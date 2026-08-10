@@ -54,6 +54,7 @@
 		B00000000000000000000011 /* AgentPreferenceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPreferenceStore.swift; sourceTree = "<group>"; };
 		B00000000000000000000012 /* AgentStatusMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStatusMonitor.swift; sourceTree = "<group>"; };
 		B00000000000000000000013 /* AgentIntegrationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentIntegrationManager.swift; sourceTree = "<group>"; };
+		B00000000000000000000014 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Version.xcconfig; path = ../../Version.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -78,6 +79,7 @@
 		C00000000000000000000010 = {
 			isa = PBXGroup;
 			children = (
+				B00000000000000000000014 /* Version.xcconfig */,
 				C00000000000000000000011 /* App */,
 				C00000000000000000000012 /* Models */,
 				C00000000000000000000013 /* Protocol */,
@@ -344,6 +346,7 @@
 		};
 		E00000000000000000000111 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = B00000000000000000000014 /* Version.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = App/CoreS3Companion.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -354,7 +357,6 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = App/Info.plist;
-				MARKETING_VERSION = 0.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.cores3companion.macos;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -364,6 +366,7 @@
 		};
 		E00000000000000000000112 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = B00000000000000000000014 /* Version.xcconfig */;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = App/CoreS3Companion.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -374,7 +377,6 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = App/Info.plist;
-				MARKETING_VERSION = 0.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.cores3companion.macos;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

@@ -9,6 +9,8 @@ namespace protocol {
 constexpr std::uint8_t kAgentStatusMessageType = 0x02;
 constexpr std::size_t kAgentStatusHeaderSize = 8;
 constexpr std::size_t kMaximumTitleLength = 60;
+constexpr std::size_t kMaximumModelNameLength = 32;
+constexpr std::size_t kMaximumEffortLength = 8;
 constexpr std::uint8_t kUnknownMetricValue = 0xFF;
 
 enum class AgentRunState : std::uint8_t {
@@ -32,6 +34,8 @@ struct AgentStatusMessage {
   std::uint8_t weeklyRemaining = kUnknownMetricValue;
   std::uint8_t contextUsed = kUnknownMetricValue;
   char title[kMaximumTitleLength + 1] = {};
+  char modelName[kMaximumModelNameLength + 1] = {};
+  char effort[kMaximumEffortLength + 1] = {};
 };
 
 enum class AgentParseResult {
@@ -43,6 +47,7 @@ enum class AgentParseResult {
   kInvalidSource,
   kMetricOutOfRange,
   kInvalidTitle,
+  kInvalidMetadata,
 };
 
 AgentParseResult parseAgentStatus(const std::uint8_t* data, std::size_t length,

@@ -61,6 +61,7 @@ bool BlePeripheral::begin() {
   }
 
   BLEDevice::init(kDeviceName);
+  BLEDevice::setMTU(185);
   server_ = BLEDevice::createServer();
   serverCallbacks_ = new ServerCallbacks(*this);
   writeCallbacks_ = new WriteCallbacks(*this);

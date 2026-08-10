@@ -13,7 +13,7 @@ bool validMetric(const std::uint8_t value) {
   return value <= 100 || value == kUnknownMetricValue;
 }
 
-bool validUtf8Title(const std::uint8_t* data, const std::size_t length) {
+bool validUtf8Text(const std::uint8_t* data, const std::size_t length) {
   std::size_t index = 0;
   while (index < length) {
     const std::uint8_t first = data[index];
@@ -86,12 +86,36 @@ AgentParseResult parseAgentStatus(const std::uint8_t* data,
   }
 
   const std::size_t titleLength = data[7];
-  if (titleLength > kMaximumTitleLength ||
-      length != kAgentStatusHeaderSize + titleLength) {
+  const std::size_t legacyLength = kAgentStatusHeaderSize + titleLength;
+  if (titleLength > kMaximumTitleLength || length < legacyLength) {
     return AgentParseResult::kInvalidLength;
   }
-  if (!validUtf8Title(data + kAgentStatusHeaderSize, titleLength)) {
+  if (!validUtf8Text(data + kAgentStatusHeaderSize, titleLength)) {
     return AgentParseResult::kInvalidTitle;
+  }
+
+  std::size_t modelLength = 0;
+  std::size_t effortLength = 0;
+  const std::uint8_t* modelData = nullptr;
+  const std::uint8_t* effortData = nullptr;
+  if (length != legacyLength) {
+    if (length < legacyLength + 2) {
+      return AgentParseResult::kInvalidLength;
+    }
+    modelLength = data[legacyLength];
+    effortLength = data[legacyLength + 1];
+    const std::size_t extendedLength =
+        legacyLength + 2 + modelLength + effortLength;
+    if (modelLength > kMaximumModelNameLength ||
+        effortLength > kMaximumEffortLength || length != extendedLength) {
+      return AgentParseResult::kInvalidLength;
+    }
+    modelData = data + legacyLength + 2;
+    effortData = modelData + modelLength;
+    if (!validUtf8Text(modelData, modelLength) ||
+        !validUtf8Text(effortData, effortLength)) {
+      return AgentParseResult::kInvalidMetadata;
+    }
   }
 
   message.state = static_cast<AgentRunState>(data[2]);
@@ -102,6 +126,14 @@ AgentParseResult parseAgentStatus(const std::uint8_t* data,
   std::memset(message.title, 0, sizeof(message.title));
   if (titleLength > 0) {
     std::memcpy(message.title, data + kAgentStatusHeaderSize, titleLength);
+  }
+  std::memset(message.modelName, 0, sizeof(message.modelName));
+  if (modelLength > 0) {
+    std::memcpy(message.modelName, modelData, modelLength);
+  }
+  std::memset(message.effort, 0, sizeof(message.effort));
+  if (effortLength > 0) {
+    std::memcpy(message.effort, effortData, effortLength);
   }
   return AgentParseResult::kOk;
 }
@@ -124,6 +156,8 @@ const char* agentParseResultName(const AgentParseResult result) {
       return "metric out of range";
     case AgentParseResult::kInvalidTitle:
       return "invalid title";
+    case AgentParseResult::kInvalidMetadata:
+      return "invalid metadata";
   }
   return "unknown error";
 }

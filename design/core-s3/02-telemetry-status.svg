@@ -31,11 +31,6 @@
     <rect x="218" y="157" width="72" height="5" fill="#173128"/><rect x="218" y="157" width="44" height="5" fill="#FFC857"/>
   </g>
   <path d="M20 181h280" stroke="#173128"/>
-  <text x="20" y="205" class="ui meta" fill="#7C8782">STEP</text>
-  <text x="68" y="205" class="ui metric" fill="#F2F5F3">03</text>
-  <text x="132" y="205" class="ui meta" fill="#7C8782">ACT</text>
-  <text x="170" y="205" class="ui metric" fill="#F2F5F3">EDIT</text>
-  <rect x="262" y="197" width="7" height="7" fill="#46F59A"/>
-  <text x="278" y="205" class="ui meta" fill="#46F59A">OK</text>
+  <text x="20" y="205" class="ui metric" fill="#F2F5F3">OPUS 4.7</text>
+  <text x="300" y="205" class="ui meta" text-anchor="end" fill="#7C8782">EFF XHIGH</text>
 </svg>
-

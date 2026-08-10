@@ -24,6 +24,22 @@ enum AgentSource: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+enum DefaultAgentTool: String, CaseIterable, Codable, Identifiable {
+    case claude
+    case codex
+
+    var id: String { rawValue }
+
+    var source: AgentSource {
+        switch self {
+        case .claude: .claude
+        case .codex: .codex
+        }
+    }
+
+    var displayName: String { source.displayName }
+}
+
 enum AgentRunState: UInt8, Codable, CaseIterable {
     case idle = 0
     case running = 1
@@ -67,6 +83,8 @@ struct AgentSnapshot: Equatable {
     var source: AgentSource
     var state: AgentRunState
     var title: String
+    var modelName: String? = nil
+    var effort: String? = nil
     var fiveHourRemaining: UInt8?
     var weeklyRemaining: UInt8?
     var contextUsed: UInt8?
@@ -77,11 +95,79 @@ struct AgentSnapshot: Equatable {
         source: .claude,
         state: .idle,
         title: "NO ACTIVE SESSION",
+        modelName: nil,
+        effort: nil,
         fiveHourRemaining: nil,
         weeklyRemaining: nil,
         contextUsed: nil,
         updatedAt: nil
     )
+}
+
+enum DisplayMetadata {
+    static let maximumModelByteCount = 32
+    static let maximumModelDisplayUnits = 14
+    static let maximumEffortByteCount = 8
+
+    static func model(_ value: String?) -> String {
+        sanitize(
+            value,
+            maximumByteCount: maximumModelByteCount,
+            maximumDisplayUnits: maximumModelDisplayUnits
+        )
+    }
+
+    static func effort(_ value: String?) -> String {
+        sanitize(
+            value,
+            maximumByteCount: maximumEffortByteCount,
+            maximumDisplayUnits: maximumEffortByteCount
+        )
+    }
+
+    private static func sanitize(
+        _ value: String?,
+        maximumByteCount: Int,
+        maximumDisplayUnits: Int
+    ) -> String {
+        guard let value else { return "" }
+        let normalized = value
+            .precomposedStringWithCanonicalMapping
+            .folding(options: [.widthInsensitive], locale: .current)
+            .uppercased()
+
+        var result = ""
+        var byteCount = 0
+        var displayUnits = 0
+        var pendingSpace = false
+        for character in normalized {
+            if character.isWhitespace {
+                pendingSpace = !result.isEmpty
+                continue
+            }
+            guard character.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
+                continue
+            }
+            let text = String(character)
+            let bytes = text.utf8.count
+            let units = character.unicodeScalars.allSatisfy(\.isASCII) ? 1 : 2
+            let space = pendingSpace ? 1 : 0
+            guard byteCount + space + bytes <= maximumByteCount,
+                  displayUnits + space + units <= maximumDisplayUnits else {
+                break
+            }
+            if pendingSpace {
+                result.append(" ")
+                byteCount += 1
+                displayUnits += 1
+            }
+            result.append(character)
+            byteCount += bytes
+            displayUnits += units
+            pendingSpace = false
+        }
+        return result
+    }
 }
 
 enum AgentIntegrationKind: String, CaseIterable, Identifiable {

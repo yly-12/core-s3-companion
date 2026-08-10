@@ -10,6 +10,8 @@ struct ContentView: View {
                 .tabItem { Label("设备", systemImage: "display") }
             AgentSettingsView()
                 .tabItem { Label("Claude / Codex", systemImage: "sparkles") }
+            ConfigurationSettingsView()
+                .tabItem { Label("配置", systemImage: "slider.horizontal.3") }
             GeneralSettingsView()
                 .tabItem { Label("关于", systemImage: "info.circle") }
         }
@@ -262,6 +264,15 @@ private struct AgentPreviewCard: View {
                     MetricPill(label: "WK", value: snapshot.weeklyRemaining)
                     MetricPill(label: "CTX", value: snapshot.contextUsed)
                 }
+                Divider()
+                HStack(spacing: 8) {
+                    Text(snapshot.modelName ?? "MODEL --")
+                        .font(.callout.monospaced())
+                    Spacer()
+                    Text(snapshot.effort.map { "EFF \($0.uppercased())" } ?? "EFF --")
+                        .font(.callout.monospaced())
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(4)
         }
@@ -275,6 +286,41 @@ private struct AgentPreviewCard: View {
         case .waitingReply: .blue
         case .completed: .mint
         }
+    }
+}
+
+private struct ConfigurationSettingsView: View {
+    @EnvironmentObject private var model: CompanionViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("配置")
+                    .font(.largeTitle.bold())
+                Text("设置自动选择时的显示偏好。")
+                    .foregroundStyle(.secondary)
+            }
+
+            GroupBox("默认工具") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("默认工具", selection: $model.defaultAgentTool) {
+                        ForEach(DefaultAgentTool.allCases) { tool in
+                            Text(tool.displayName).tag(tool)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+
+                    Text("当 Claude 和 Codex 都没有活跃 session 时，优先展示所选工具最近的状态。存在活跃 session 时仍按实时状态自动选择和轮播。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+
+            Spacer()
+        }
+        .padding(24)
     }
 }
 

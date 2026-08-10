@@ -18,12 +18,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
       - name: Require vMAJOR.MINOR.PATCH
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Release tag must use vMAJOR.MINOR.PATCH, for example v0.0.1"
+            echo "::error::Release tag must use vMAJOR.MINOR.PATCH, for example v1.2.3"
+            exit 1
+          fi
+
+          configured_version="$(awk -F= '/^[[:space:]]*MARKETING_VERSION[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}' Version.xcconfig)"
+          tag_version="${RELEASE_TAG#v}"
+          if [[ -z "$configured_version" || "$tag_version" != "$configured_version" ]]; then
+            echo "::error::Release tag $RELEASE_TAG does not match Version.xcconfig ($configured_version)"
             exit 1
           fi
 
@@ -100,10 +110,7 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
 
       - name: Archive unsigned app
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          version="${RELEASE_TAG#v}"
           archive_path="$RUNNER_TEMP/CoreS3Companion.xcarchive"
 
           xcodebuild archive \
@@ -113,7 +120,6 @@ jobs:
             -destination 'generic/platform=macOS' \
             -archivePath "$archive_path" \
             -derivedDataPath "$RUNNER_TEMP/CoreS3CompanionDerivedData" \
-            MARKETING_VERSION="$version" \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO

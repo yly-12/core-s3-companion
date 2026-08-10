@@ -27,8 +27,6 @@
     <text x="116" y="169" class="metric" fill="#F2F5F3">WK 42%</text>
     <text x="212" y="169" class="metric" fill="#FFC857">CTX 61%</text>
   </g>
-  <text x="22" y="210" class="ui meta" fill="#7C8782">SYNC</text>
-  <text x="76" y="210" class="ui metric" fill="#46F59A">OK</text>
-  <text x="176" y="210" class="ui meta" fill="#7C8782">AGE</text>
-  <text x="300" y="210" class="ui metric" text-anchor="end" fill="#F2F5F3">01S</text>
+  <text x="22" y="210" class="ui metric" fill="#F2F5F3">OPUS 4.7</text>
+  <text x="300" y="210" class="ui meta" text-anchor="end" fill="#7C8782">EFF XHIGH</text>
 </svg>

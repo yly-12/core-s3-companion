@@ -25,7 +25,7 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
 
     private let originalClaudeStatusLineKey = "_coreS3CompanionOriginalStatusLine"
     private let managedScriptNeedle = "core-s3-agent-hook.js"
-    private let managedAssetMarker = "core-s3-hook-schema-v2"
+    private let managedAssetMarker = "core-s3-hook-schema-v4"
 
     init(
         homeURL: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -372,7 +372,7 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
     }
 
     private static let jxaHookScript = #"""
-    // core-s3-hook-schema-v2
+    // core-s3-hook-schema-v4
     ObjC.import('Foundation');
 
     function readInput() {
@@ -412,6 +412,20 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
       return size > 0 ? numberValue(input / size * 100) : null;
     }
 
+    function modelName(payload) {
+      var model = payload.model;
+      if (typeof model === 'string') return firstLine(model);
+      model = model || {};
+      return firstLine(model.display_name || model.id);
+    }
+
+    function effortLevel(payload) {
+      var effort = payload.effort;
+      if (typeof effort === 'string') return firstLine(effort);
+      effort = effort || {};
+      return firstLine(effort.level || payload.reasoning_effort);
+    }
+
     function firstLine(value) {
       return String(value || '').split(/\r?\n/)[0].replace(/\s+/g, ' ').trim().slice(0, 120);
     }
@@ -444,7 +458,18 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
         var sessionPath = stateDirectory + '/claude-session-' + safeSessionID(id) + '.json';
         var session = readJSON(sessionPath);
         var workspace = payload.workspace || {};
-        var sessionTitle = firstLine(payload.session_name || session.title || directoryName(workspace.current_dir));
+        var currentModel = modelName(payload) || String(session.modelName || '');
+        var currentEffort = effortLevel(payload) || String(session.effort || '');
+        var sessionTitle = firstLine(payload.session_name);
+        var titleSource = sessionTitle ? 'session_metadata' : '';
+        if (!sessionTitle && (session.titleSource === 'session_metadata' || session.titleSource === 'workspace')) {
+          sessionTitle = firstLine(session.title);
+          titleSource = String(session.titleSource);
+        }
+        if (!sessionTitle) {
+          sessionTitle = directoryName(workspace.current_dir);
+          titleSource = sessionTitle ? 'workspace' : '';
+        }
         writeJSON(stateDirectory + '/claude-usage.json', {
           fiveHourUsed: numberValue(five.used_percentage != null ? five.used_percentage : five.utilization),
           weeklyUsed: numberValue(weekly.used_percentage != null ? weekly.used_percentage : weekly.utilization),
@@ -456,6 +481,9 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
           source: 'claude',
           state: String(session.state || 'idle'),
           title: sessionTitle || 'CLAUDE SESSION',
+          titleSource: titleSource,
+          modelName: currentModel,
+          effort: currentEffort,
           contextUsed: contextValue(payload),
           updatedAt: session.updatedAt || now,
           metricsUpdatedAt: now
@@ -478,10 +506,21 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
       if (event === 'Notification' && (notification.indexOf('idle') >= 0 || notification.indexOf('question') >= 0 || notification.indexOf('elicitation') >= 0 || notification.indexOf('away_summary') >= 0)) state = 'waiting_reply';
       if (event === 'Stop' || event === 'StopFailure') state = 'completed';
 
-      var title = String(previous.title || '');
-      if (event === 'UserPromptSubmit' && payload.prompt) title = firstLine(payload.prompt);
-      if (!title && payload.cwd) title = String(payload.cwd).split('/').pop();
+      var suppliedTitle = firstLine(payload.session_name || payload.thread_name || payload.session_title);
+      var title = suppliedTitle;
+      var titleSource = suppliedTitle ? 'session_metadata' : '';
+      if (!title && payload.cwd) {
+        title = String(payload.cwd).split('/').pop();
+        titleSource = 'workspace';
+      }
+      if (!title && (previous.titleSource === 'session_metadata' || previous.titleSource === 'workspace')) {
+        title = String(previous.title || '');
+        titleSource = String(previous.titleSource);
+      }
       if (!title) title = source === 'codex' ? 'CODEX SESSION' : 'CLAUDE SESSION';
+
+      var currentModel = modelName(payload) || String(previous.modelName || '');
+      var currentEffort = effortLevel(payload) || String(previous.effort || '');
 
       var context = contextValue(payload);
       writeJSON(path, {
@@ -489,6 +528,9 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
         source: source,
         state: state,
         title: title,
+        titleSource: titleSource,
+        modelName: currentModel,
+        effort: currentEffort,
         contextUsed: context != null ? context : previous.contextUsed,
         updatedAt: now
       });

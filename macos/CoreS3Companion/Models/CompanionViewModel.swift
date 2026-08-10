@@ -19,6 +19,13 @@ final class CompanionViewModel: ObservableObject {
             monitor.refresh()
         }
     }
+    @Published var defaultAgentTool: DefaultAgentTool {
+        didSet {
+            preferenceStore.defaultTool = defaultAgentTool
+            monitor.defaultTool = defaultAgentTool
+            monitor.refresh()
+        }
+    }
 
     private let transport: BLETransporting
     private let monitor: AgentStatusMonitoring
@@ -42,6 +49,7 @@ final class CompanionViewModel: ObservableObject {
         self.preferenceStore = preferenceStore
         self.integrationManager = integrationManager
         selectedAgentSource = preferenceStore.selectedSource
+        defaultAgentTool = preferenceStore.defaultTool
         pairedDeviceID = pairedDeviceStore.deviceID
         pairedDeviceName = pairedDeviceStore.deviceName
 
@@ -71,6 +79,7 @@ final class CompanionViewModel: ObservableObject {
             self.receive(snapshots)
         }
         monitor.selectedSource = selectedAgentSource
+        monitor.defaultTool = defaultAgentTool
     }
 
     func start() {

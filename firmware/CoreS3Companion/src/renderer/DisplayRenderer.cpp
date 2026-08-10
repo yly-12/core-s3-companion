@@ -128,14 +128,14 @@ void DisplayRenderer::render(const app::CompanionState& state) {
       (status.state == protocol::AgentRunState::kWaitingAuthorization ||
        status.state == protocol::AgentRunState::kWaitingReply);
   const bool alertTextVisible = !alertState || (millis() / 500) % 2 == 0;
-  char signature[128];
+  char signature[256];
   std::snprintf(
-      signature, sizeof(signature), "%u|%u|%u|%u|%u|%u|%u|%u|%u|%s",
+      signature, sizeof(signature), "%u|%u|%u|%u|%u|%u|%u|%u|%u|%s|%s|%s",
       state.isConnected(), state.hasFreshStatus(),
       static_cast<unsigned>(status.source),
       static_cast<unsigned>(status.state), status.fiveHourRemaining,
       status.weeklyRemaining, status.contextUsed, state.batteryLevel(),
-      alertTextVisible, status.title);
+      alertTextVisible, status.title, status.modelName, status.effort);
   if (lastSignature_ == signature) {
     return;
   }
@@ -197,8 +197,17 @@ void DisplayRenderer::render(const app::CompanionState& state) {
                218, 86, color(255, 200, 87));
   }
 
-  M5.Display.fillRect(16, 211, 7, 7, accent);
-  drawText(state.hasFreshStatus() ? "LIVE" : detail, 34, 207, 2, accent);
+  const char* modelName = state.hasFreshStatus() && status.modelName[0] != '\0'
+                              ? status.modelName
+                              : "MODEL --";
+  char effort[16];
+  if (state.hasFreshStatus() && status.effort[0] != '\0') {
+    std::snprintf(effort, sizeof(effort), "EFF %s", status.effort);
+  } else {
+    std::snprintf(effort, sizeof(effort), "EFF --");
+  }
+  drawText(modelName, 16, 207, 2, primary);
+  drawText(effort, 304, 207, 2, muted, top_right);
 }
 
 }  // namespace renderer

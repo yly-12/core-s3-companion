@@ -39,11 +39,11 @@ Minimal Status 同时提供完整状态：
 | `WK` | Weekly 额度 | 显示剩余百分比 |
 | `CTX` | 当前对话 Context | 显示已占用百分比 |
 | `BAT` / `B` | CoreS3 电池 | 显示剩余百分比 |
-| `ACT` | 当前动作 | 例如 `EDIT` |
-| `AGE` | 距离上次状态更新 | 例如 `01S` |
+| `EFF` | 当前 reasoning effort | 例如 `EFF XHIGH` |
 
 会话标题保持单行，客户端会按屏幕宽度截断。固件使用 M5GFX 的 `efontCN_16_b` 中文
-位图字体，因此可以直接显示 UTF-8 中英文标题。
+位图字体，因此可以直接显示 UTF-8 中英文标题。底栏左侧显示当前 session 模型名称，
+右侧显示 effort；字段不可用时显示 `MODEL -- / EFF --`。
 
 ## 字体与颜色
 
@@ -70,7 +70,7 @@ CoreS3 支持触摸，但 V1 只展示信息，因此设计稿中没有按钮、
 
 首版建议采用 `01-minimal-status.svg` 的信息层级，并按风险从低到高逐步实现：
 
-1. 扩展 Mac 到 CoreS3 的协议，传递状态、标题、额度、Context 和电池信息。
+1. 扩展 Mac 到 CoreS3 的协议，传递状态、标题、模型、effort、额度、Context 和电池信息。
 2. 固件按固定区域局部重绘；只有字段变化时更新对应区域。
 3. 状态字段使用枚举，不要让固件解析任意状态字符串。
 4. Telemetry Status 和 Pixel Terminal 更适合作为后续可切换页面，不建议同时塞入首版。

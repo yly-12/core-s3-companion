@@ -27,8 +27,6 @@
     <text x="218" y="168" class="value" fill="#F2F5F3">CTX 61%</text>
     <rect x="218" y="178" width="86" height="6" fill="#173128"/><rect x="218" y="178" width="52" height="6" fill="#FFC857"/>
   </g>
-  <rect x="16" y="211" width="7" height="7" fill="#46F59A"/>
-  <text x="34" y="219" class="ui meta" fill="#46F59A">LIVE</text>
-  <text x="304" y="219" class="ui meta" text-anchor="end" fill="#7C8782">01S</text>
+  <text x="16" y="219" class="ui meta" fill="#F2F5F3">OPUS 4.7</text>
+  <text x="304" y="219" class="ui meta" text-anchor="end" fill="#7C8782">EFF XHIGH</text>
 </svg>
-

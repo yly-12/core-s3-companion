@@ -15,6 +15,8 @@ struct AgentStatusMessageTests {
             source: .claude,
             state: .waitingAuthorization,
             title: "Firmware CI",
+            modelName: "Opus 4.7",
+            effort: "xhigh",
             fiveHourRemaining: 68,
             weeklyRemaining: 42,
             contextUsed: 61,
@@ -23,7 +25,10 @@ struct AgentStatusMessageTests {
 
         let data = try AgentStatusMessageEncoder.encode(snapshot)
         #expect(Array(data.prefix(8)) == [0x01, 0x02, 0x02, 0x01, 68, 42, 61, 11])
-        #expect(String(decoding: data.dropFirst(8), as: UTF8.self) == "FIRMWARE CI")
+        #expect(String(decoding: data.dropFirst(8).prefix(11), as: UTF8.self) == "FIRMWARE CI")
+        #expect(Array(data.dropFirst(19).prefix(2)) == [8, 5])
+        #expect(String(decoding: data.dropFirst(21).prefix(8), as: UTF8.self) == "OPUS 4.7")
+        #expect(String(decoding: data.suffix(5), as: UTF8.self) == "XHIGH")
     }
 
     @Test("Unknown metrics use the sentinel value")
@@ -83,6 +88,13 @@ struct AgentIntegrationManagerTests {
 
         let settingsURL = home.appendingPathComponent(".claude/settings.json")
         try FileManager.default.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let claudeSessionsURL = home.appendingPathComponent(".claude/sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeSessionsURL, withIntermediateDirectories: true)
+        try jsonData([
+            "sessionId": "claude-test-session",
+            "name": "中文会话标题",
+            "nameSource": "derived",
+        ]).write(to: claudeSessionsURL.appendingPathComponent("12345.json"))
         try jsonData([
             "hooks": [
                 "SessionStart": [["hooks": [["type": "command", "command": "echo existing"]]]]
@@ -105,12 +117,17 @@ struct AgentIntegrationManagerTests {
                 "prompt": "Allow firmware upload?",
             ]
         )
+        let stateURL = support.appendingPathComponent("state/claude-session-claude-test-session.json")
+        let hookState = try jsonObject(at: stateURL)
+        #expect(hookState["title"] as? String == "core-s3")
         try runHook(
             scriptURL: hookScript,
             source: "claude-status",
             payload: [
                 "session_id": "claude-test-session",
-                "session_name": "中文会话",
+                "session_name": "状态栏旧标题",
+                "model": ["id": "claude-opus-5", "display_name": "Opus 5"],
+                "effort": ["level": "xhigh"],
                 "context_window": ["used_percentage": 37],
                 "rate_limits": [
                     "five_hour": ["used_percentage": 12],
@@ -118,19 +135,22 @@ struct AgentIntegrationManagerTests {
                 ],
             ]
         )
-        let stateURL = support.appendingPathComponent("state/claude-session-claude-test-session.json")
         let state = try jsonObject(at: stateURL)
         #expect(state["state"] as? String == "waiting_authorization")
 
         let monitor = AgentStatusMonitor(
             stateDirectoryURL: support.appendingPathComponent("state"),
-            codexSessionsURL: root.appendingPathComponent("no-codex-sessions")
+            codexSessionsURL: root.appendingPathComponent("no-codex-sessions"),
+            claudeSessionsURL: claudeSessionsURL,
+            codexSessionIndexURL: root.appendingPathComponent("no-codex-index")
         )
         monitor.selectedSource = .claude
         var snapshots: [AgentSnapshot] = []
         monitor.onSnapshots = { snapshots = $0 }
         monitor.refresh()
-        #expect(snapshots.first?.title == "中文会话")
+        #expect(snapshots.first?.title == "中文会话标题")
+        #expect(snapshots.first?.modelName == "Opus 5")
+        #expect(snapshots.first?.effort == "xhigh")
         #expect(snapshots.first?.fiveHourRemaining == 88)
         #expect(snapshots.first?.weeklyRemaining == 66)
         #expect(snapshots.first?.contextUsed == 37)
@@ -179,7 +199,15 @@ struct AgentStatusMonitorTests {
 
         let rollout = sessions.appendingPathComponent("rollout-test.jsonl")
         let lines = [
-            try rolloutLine(type: "user_message", payload: ["message": "Implement menu bar status"]),
+            try rolloutRecord(outerType: "session_meta", payload: [
+                "id": "codex-test-session",
+                "cwd": "/tmp/core-s3-companion",
+            ]),
+            try rolloutRecord(outerType: "turn_context", payload: [
+                "model": "gpt-5.6-sol",
+                "effort": "high",
+            ]),
+            try rolloutLine(type: "user_message", payload: ["message": "This must not become the title"]),
             try rolloutLine(type: "request_user_input", payload: ["prompt": "Choose a layout"]),
             try rolloutLine(type: "token_count", payload: [
                 "rate_limits": [
@@ -193,8 +221,19 @@ struct AgentStatusMonitorTests {
             ]),
         ]
         try lines.joined(separator: "\n").write(to: rollout, atomically: true, encoding: .utf8)
+        let sessionIndex = root.appendingPathComponent("session_index.jsonl")
+        try rolloutRecord(outerType: nil, payload: [
+            "id": "codex-test-session",
+            "thread_name": "菜单栏状态实现",
+            "updated_at": isoTimestamp(.now),
+        ]).write(to: sessionIndex, atomically: true, encoding: .utf8)
 
-        let monitor = AgentStatusMonitor(stateDirectoryURL: states, codexSessionsURL: root.appendingPathComponent("sessions"))
+        let monitor = AgentStatusMonitor(
+            stateDirectoryURL: states,
+            codexSessionsURL: root.appendingPathComponent("sessions"),
+            claudeSessionsURL: root.appendingPathComponent("no-claude-sessions"),
+            codexSessionIndexURL: sessionIndex
+        )
         monitor.selectedSource = .codex
         var snapshot: AgentSnapshot?
         monitor.onSnapshots = { snapshot = $0.first }
@@ -202,7 +241,9 @@ struct AgentStatusMonitorTests {
 
         #expect(snapshot?.source == .codex)
         #expect(snapshot?.state == .waitingReply)
-        #expect(snapshot?.title == "Implement menu bar status")
+        #expect(snapshot?.title == "菜单栏状态实现")
+        #expect(snapshot?.modelName == "gpt-5.6-sol")
+        #expect(snapshot?.effort == "high")
         #expect(snapshot?.fiveHourRemaining == nil)
         #expect(snapshot?.weeklyRemaining == 68)
         #expect(snapshot?.contextUsed == 61)
@@ -230,7 +271,9 @@ struct AgentStatusMonitorTests {
 
         let monitor = AgentStatusMonitor(
             stateDirectoryURL: root,
-            codexSessionsURL: root.appendingPathComponent("no-codex")
+            codexSessionsURL: root.appendingPathComponent("no-codex"),
+            claudeSessionsURL: root.appendingPathComponent("no-claude-sessions"),
+            codexSessionIndexURL: root.appendingPathComponent("no-codex-index")
         )
         monitor.selectedSource = .claude
         var snapshots: [AgentSnapshot] = []
@@ -239,10 +282,57 @@ struct AgentStatusMonitorTests {
 
         #expect(snapshots.map(\.sessionID) == ["session-auth", "session-running"])
     }
+
+    @Test("Uses the configured default tool only when no session is active")
+    func usesConfiguredIdleFallback() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("core-s3-default-tool-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let now = Date().timeIntervalSince1970
+        try jsonData([
+            "sessionID": "claude-idle",
+            "state": "idle",
+            "title": "Claude idle",
+            "updatedAt": now,
+        ]).write(to: root.appendingPathComponent("claude-session-idle.json"))
+        try jsonData([
+            "sessionID": "codex-idle",
+            "state": "idle",
+            "title": "Codex idle",
+            "updatedAt": now - 60,
+        ]).write(to: root.appendingPathComponent("codex-session-idle.json"))
+
+        let monitor = AgentStatusMonitor(
+            stateDirectoryURL: root,
+            codexSessionsURL: root.appendingPathComponent("no-rollouts"),
+            claudeSessionsURL: root.appendingPathComponent("no-claude-sessions"),
+            codexSessionIndexURL: root.appendingPathComponent("no-codex-index")
+        )
+        monitor.selectedSource = .automatic
+        monitor.defaultTool = .codex
+        var snapshots: [AgentSnapshot] = []
+        monitor.onSnapshots = { snapshots = $0 }
+        monitor.refresh()
+
+        #expect(snapshots.first?.sessionID == "codex-idle")
+        #expect(snapshots.first?.source == .codex)
+    }
 }
 
 @Suite("Companion view model")
 struct CompanionViewModelTests {
+    @Test("Persists the configured default tool")
+    func persistsDefaultTool() {
+        let preferences = MemoryAgentPreferenceStore()
+        let model = makeModel(preferenceStore: preferences)
+
+        #expect(model.defaultAgentTool == .claude)
+        model.defaultAgentTool = .codex
+
+        #expect(preferences.defaultTool == .codex)
+    }
+
     @Test("Manual pairing is saved only after service discovery succeeds")
     func manualPairIsSavedOnlyAfterTransportIsReady() {
         let transport = MockBLETransport()
@@ -325,13 +415,14 @@ struct CompanionViewModelTests {
 private func makeModel(
     transport: MockBLETransport = MockBLETransport(),
     monitor: MockAgentStatusMonitor = MockAgentStatusMonitor(),
-    pairedStore: MemoryPairedDeviceStore = MemoryPairedDeviceStore()
+    pairedStore: MemoryPairedDeviceStore = MemoryPairedDeviceStore(),
+    preferenceStore: MemoryAgentPreferenceStore = MemoryAgentPreferenceStore()
 ) -> CompanionViewModel {
     CompanionViewModel(
         transport: transport,
         monitor: monitor,
         pairedDeviceStore: pairedStore,
-        preferenceStore: MemoryAgentPreferenceStore(),
+        preferenceStore: preferenceStore,
         integrationManager: MockAgentIntegrationManager()
     )
 }
@@ -355,6 +446,7 @@ private final class MockBLETransport: BLETransporting {
 private final class MockAgentStatusMonitor: AgentStatusMonitoring {
     var onSnapshots: (([AgentSnapshot]) -> Void)?
     var selectedSource: AgentSource = .automatic
+    var defaultTool: DefaultAgentTool = .claude
     func start() {}
     func stop() {}
     func refresh() {}
@@ -372,6 +464,7 @@ private final class MemoryPairedDeviceStore: PairedDeviceStoring {
 
 private final class MemoryAgentPreferenceStore: AgentPreferenceStoring {
     var selectedSource: AgentSource = .automatic
+    var defaultTool: DefaultAgentTool = .claude
 }
 
 private final class MockAgentIntegrationManager: AgentIntegrationManaging {
@@ -397,11 +490,19 @@ private func jsonText(_ object: [String: Any]) -> String {
 private func rolloutLine(type: String, payload: [String: Any]) throws -> String {
     var eventPayload = payload
     eventPayload["type"] = type
-    let object: [String: Any] = [
+    return try rolloutRecord(outerType: "event_msg", payload: eventPayload)
+}
+
+private func rolloutRecord(outerType: String?, payload: [String: Any]) throws -> String {
+    var object: [String: Any] = [
         "timestamp": isoTimestamp(.now),
-        "type": "event_msg",
-        "payload": eventPayload,
+        "payload": payload,
     ]
+    if let outerType {
+        object["type"] = outerType
+    } else {
+        object = payload
+    }
     return String(data: try JSONSerialization.data(withJSONObject: object), encoding: .utf8)!
 }
 

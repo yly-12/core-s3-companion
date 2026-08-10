@@ -36,6 +36,31 @@ void testParsesAgentStatus() {
   TEST_ASSERT_EQUAL_UINT8(42, message.weeklyRemaining);
   TEST_ASSERT_EQUAL_UINT8(61, message.contextUsed);
   TEST_ASSERT_EQUAL_STRING("FIRMWARE CI", message.title);
+  TEST_ASSERT_EQUAL_STRING("", message.modelName);
+  TEST_ASSERT_EQUAL_STRING("", message.effort);
+}
+
+void testParsesExtendedAgentStatus() {
+  const char* title = "STATUS UI";
+  const char* model = "GPT-5.6-SOL";
+  const char* effort = "HIGH";
+  std::vector<std::uint8_t> frame = {
+      0x01, 0x02, 0x01, 0x02, 0xFF, 70, 45,
+      static_cast<std::uint8_t>(std::strlen(title))};
+  frame.insert(frame.end(), title, title + std::strlen(title));
+  frame.push_back(static_cast<std::uint8_t>(std::strlen(model)));
+  frame.push_back(static_cast<std::uint8_t>(std::strlen(effort)));
+  frame.insert(frame.end(), model, model + std::strlen(model));
+  frame.insert(frame.end(), effort, effort + std::strlen(effort));
+
+  companion::protocol::AgentStatusMessage message;
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(AgentParseResult::kOk),
+      static_cast<int>(companion::protocol::parseAgentStatus(
+          frame.data(), frame.size(), message)));
+  TEST_ASSERT_EQUAL_STRING(title, message.title);
+  TEST_ASSERT_EQUAL_STRING(model, message.modelName);
+  TEST_ASSERT_EQUAL_STRING(effort, message.effort);
 }
 
 void testAgentStatusAcceptsUnknownMetrics() {
@@ -132,6 +157,7 @@ int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(testParsesLegacyCpuUsage);
   RUN_TEST(testParsesAgentStatus);
+  RUN_TEST(testParsesExtendedAgentStatus);
   RUN_TEST(testAgentStatusAcceptsUnknownMetrics);
   RUN_TEST(testAgentStatusAcceptsChineseUtf8Title);
   RUN_TEST(testAgentStatusRejectsInvalidUtf8Title);

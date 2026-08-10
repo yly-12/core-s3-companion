@@ -98,7 +98,13 @@ pio test -e native
   `window_minutes` 分类；账号没有 5H 窗口时不显示该项。Codex 的 CTX 按最新一次
   token usage 除以该会话的模型 context window 计算，不使用跨请求累计 token。
 
+会话标题使用 Agent 自身维护的 session 元数据：Claude 读取 `~/.claude/sessions/*.json`
+中的 `name`，Codex 读取 `~/.codex/session_index.jsonl` 中的 `thread_name`。用户每一轮
+发送的 prompt 只用于更新运行状态，不会覆盖标题；元数据暂不可用时才回退到工作区名。
+
 同时有多个活跃会话时，客户端每 3 秒轮播一次。AUTH 与 REPLY 状态文字会在设备上闪烁。
+“配置”页可以选择默认工具（Claude 或 Codex，默认为 Claude）；它只在两边都没有活跃
+session 时决定优先展示哪一边最近的状态。
 
 首次改动已有配置时会生成 `.core-s3-companion.backup` 备份。配置完成后需要重启正在
 运行的 Claude/Codex 会话。为了访问这些用户级配置，客户端不是 App Sandbox 应用。
@@ -117,7 +123,7 @@ Write Characteristic UUID：
 7B3E0002-6F2B-4B7C-9B4E-3A8C1D5F2A10
 ```
 
-Agent 状态消息由 8 字节头部和最多 60 字节 UTF-8 标题组成：
+Agent 状态消息由 8 字节基础头部、最多 60 字节 UTF-8 标题和可选模型元数据后缀组成：
 
 | 字节 | 含义 | 值 |
 |---|---|---|
@@ -130,6 +136,10 @@ Agent 状态消息由 8 字节头部和最多 60 字节 UTF-8 标题组成：
 | 6 | Context 已用 | `0...100`，未知为 `0xFF` |
 | 7 | 标题字节数 | `0...60` |
 | 8... | 会话标题 | 合法 UTF-8；内置中英文位图字体 |
+
+标题后缀依次为 `模型名长度`、`effort 长度`、模型名 UTF-8 字节和 effort UTF-8 字节。
+模型名最多 32 字节、effort 最多 8 字节；新固件仍接受没有该后缀的旧状态帧。屏幕底栏
+左侧显示模型，右侧显示 `EFF <LEVEL>`。
 
 旧的 `0x01` CPU 三字节帧解析仍保留用于协议兼容测试，但新版客户端只发送 Agent
 状态帧。固件会拒绝长度、版本、状态、指标或标题不合法的消息。连接断开或 3 秒没有
@@ -183,18 +193,23 @@ Apple 公证；应用为读取 Claude/Codex 用户配置而不启用 App Sandbox
 
 ### 创建 Release
 
-确认 CI 通过后创建并推送语义化版本标签：
+仓库根目录的 `Version.xcconfig` 是版本号的唯一来源，Xcode 本地构建和 GitHub Release
+都会读取其中的 `MARKETING_VERSION`。发布新版本时先修改该文件，然后用以下命令创建
+并推送匹配的语义化版本标签：
 
 ```bash
-git tag v0.0.1
-git push origin v0.0.1
+version="$(awk -F= '/^[[:space:]]*MARKETING_VERSION[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}' Version.xcconfig)"
+git tag "v${version}"
+git push origin "v${version}"
 ```
+
+如果标签与 `Version.xcconfig` 不一致，Release 工作流会立即失败。
 
 Release 流程成功后会生成：
 
-- `CoreS3Companion-v0.0.1-app.bin`
-- `CoreS3Companion-v0.0.1-factory.bin`
-- `CoreS3Companion-v0.0.1-macOS-unsigned.dmg`
+- `CoreS3Companion-v<版本号>-app.bin`
+- `CoreS3Companion-v<版本号>-factory.bin`
+- `CoreS3Companion-v<版本号>-macOS-unsigned.dmg`
 - `SHA256SUMS.txt`
 
 上述 CI 和 Release 均不需要付费 Apple Developer 账号。
