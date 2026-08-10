@@ -26,6 +26,12 @@ final class CompanionViewModel: ObservableObject {
             monitor.refresh()
         }
     }
+    @Published var displaySleepTimeout: DisplaySleepTimeout {
+        didSet {
+            preferenceStore.displaySleepTimeout = displaySleepTimeout
+            sendCurrentSnapshot()
+        }
+    }
 
     private let transport: BLETransporting
     private let monitor: AgentStatusMonitoring
@@ -50,6 +56,7 @@ final class CompanionViewModel: ObservableObject {
         self.integrationManager = integrationManager
         selectedAgentSource = preferenceStore.selectedSource
         defaultAgentTool = preferenceStore.defaultTool
+        displaySleepTimeout = preferenceStore.displaySleepTimeout
         pairedDeviceID = pairedDeviceStore.deviceID
         pairedDeviceName = pairedDeviceStore.deviceName
 
@@ -154,7 +161,11 @@ final class CompanionViewModel: ObservableObject {
 
     private func sendCurrentSnapshot() {
         guard isConnected,
-              let packet = try? AgentStatusMessageEncoder.encode(agentSnapshot) else {
+              let packet = try? AgentStatusMessageEncoder.encode(
+                  agentSnapshot,
+                  screenTimeout: displaySleepTimeout,
+                  activityAt: agentSnapshots.compactMap(\.updatedAt).max()
+              ) else {
             return
         }
         _ = transport.send(packet)

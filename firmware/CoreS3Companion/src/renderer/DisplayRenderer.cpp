@@ -122,6 +122,21 @@ void DisplayRenderer::begin() {
 }
 
 void DisplayRenderer::render(const app::CompanionState& state) {
+  if (!state.isDisplayAwake()) {
+    if (displayAwake_) {
+      M5.Display.sleep();
+      displayAwake_ = false;
+      lastSignature_.clear();
+    }
+    return;
+  }
+
+  if (!displayAwake_) {
+    M5.Display.wakeup();
+    displayAwake_ = true;
+    lastSignature_.clear();
+  }
+
   const auto& status = state.status();
   const bool alertState =
       state.hasFreshStatus() &&

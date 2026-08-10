@@ -297,7 +297,7 @@ private struct ConfigurationSettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("配置")
                     .font(.largeTitle.bold())
-                Text("设置自动选择时的显示偏好。")
+                Text("设置默认内容和屏幕行为。")
                     .foregroundStyle(.secondary)
             }
 
@@ -312,6 +312,22 @@ private struct ConfigurationSettingsView: View {
                     .labelsHidden()
 
                     Text("当 Claude 和 Codex 都没有活跃 session 时，优先展示所选工具最近的状态。存在活跃 session 时仍按实时状态自动选择和轮播。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+
+            GroupBox("屏幕") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("自动熄屏", selection: $model.displaySleepTimeout) {
+                        ForEach(DisplaySleepTimeout.allCases) { timeout in
+                            Text(timeout.displayName).tag(timeout)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Text("从最后一次 Claude/Codex 状态更新开始计时；新消息或点击 CoreS3 屏幕会立即唤醒并重新计时。")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }

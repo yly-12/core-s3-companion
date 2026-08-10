@@ -98,16 +98,20 @@ AgentParseResult parseAgentStatus(const std::uint8_t* data,
   std::size_t effortLength = 0;
   const std::uint8_t* modelData = nullptr;
   const std::uint8_t* effortData = nullptr;
+  std::uint8_t displayTimeoutMinutes = 0;
+  std::uint32_t activityToken = 0;
   if (length != legacyLength) {
     if (length < legacyLength + 2) {
       return AgentParseResult::kInvalidLength;
     }
     modelLength = data[legacyLength];
     effortLength = data[legacyLength + 1];
-    const std::size_t extendedLength =
+    const std::size_t metadataLength =
         legacyLength + 2 + modelLength + effortLength;
     if (modelLength > kMaximumModelNameLength ||
-        effortLength > kMaximumEffortLength || length != extendedLength) {
+        effortLength > kMaximumEffortLength ||
+        (length != metadataLength &&
+         length != metadataLength + kDisplaySettingsLength)) {
       return AgentParseResult::kInvalidLength;
     }
     modelData = data + legacyLength + 2;
@@ -115,6 +119,18 @@ AgentParseResult parseAgentStatus(const std::uint8_t* data,
     if (!validUtf8Text(modelData, modelLength) ||
         !validUtf8Text(effortData, effortLength)) {
       return AgentParseResult::kInvalidMetadata;
+    }
+
+    if (length == metadataLength + kDisplaySettingsLength) {
+      displayTimeoutMinutes = data[metadataLength];
+      if (displayTimeoutMinutes > kMaximumDisplayTimeoutMinutes) {
+        return AgentParseResult::kInvalidDisplayTimeout;
+      }
+      activityToken =
+          (static_cast<std::uint32_t>(data[metadataLength + 1]) << 24) |
+          (static_cast<std::uint32_t>(data[metadataLength + 2]) << 16) |
+          (static_cast<std::uint32_t>(data[metadataLength + 3]) << 8) |
+          static_cast<std::uint32_t>(data[metadataLength + 4]);
     }
   }
 
@@ -135,6 +151,8 @@ AgentParseResult parseAgentStatus(const std::uint8_t* data,
   if (effortLength > 0) {
     std::memcpy(message.effort, effortData, effortLength);
   }
+  message.displayTimeoutMinutes = displayTimeoutMinutes;
+  message.activityToken = activityToken;
   return AgentParseResult::kOk;
 }
 
@@ -158,6 +176,8 @@ const char* agentParseResultName(const AgentParseResult result) {
       return "invalid title";
     case AgentParseResult::kInvalidMetadata:
       return "invalid metadata";
+    case AgentParseResult::kInvalidDisplayTimeout:
+      return "invalid display timeout";
   }
   return "unknown error";
 }

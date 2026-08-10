@@ -11,7 +11,11 @@ enum AgentStatusMessageEncoder {
     static let unknownValue: UInt8 = 0xFF
     static let headerSize = 8
 
-    static func encode(_ snapshot: AgentSnapshot) throws -> Data {
+    static func encode(
+        _ snapshot: AgentSnapshot,
+        screenTimeout: DisplaySleepTimeout = .never,
+        activityAt: Date? = nil
+    ) throws -> Data {
         let title = DisplayTitle.sanitize(snapshot.title)
         let titleBytes = Array(title.utf8)
         let modelBytes = Array(DisplayMetadata.model(snapshot.modelName).utf8)
@@ -46,6 +50,17 @@ enum AgentStatusMessageEncoder {
         bytes.append(UInt8(effortBytes.count))
         bytes.append(contentsOf: modelBytes)
         bytes.append(contentsOf: effortBytes)
+        bytes.append(screenTimeout.rawValue)
+
+        let timestamp = activityAt ?? snapshot.updatedAt
+        let milliseconds = timestamp.map {
+            Int64(($0.timeIntervalSince1970 * 1_000).rounded())
+        } ?? 0
+        let activityToken = UInt32(truncatingIfNeeded: milliseconds)
+        bytes.append(UInt8((activityToken >> 24) & 0xFF))
+        bytes.append(UInt8((activityToken >> 16) & 0xFF))
+        bytes.append(UInt8((activityToken >> 8) & 0xFF))
+        bytes.append(UInt8(activityToken & 0xFF))
         return Data(bytes)
     }
 }

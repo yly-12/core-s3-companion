@@ -43,6 +43,11 @@ void setup() {
 
 void loop() {
   M5.update();
+  const std::uint32_t nowMs = millis();
+
+  if (M5.Touch.getDetail().wasPressed()) {
+    appState.recordLocalActivity(nowMs);
+  }
 
   const bool connected = blePeripheral.isConnected();
   if (connected != lastConnectionState) {
@@ -52,14 +57,14 @@ void loop() {
 
   companion::protocol::AgentStatusMessage status;
   if (blePeripheral.receiveAgentStatus(status)) {
-    appState.setAgentStatus(status, millis());
+    appState.setAgentStatus(status, nowMs);
   }
 
   if (millis() - lastBatteryRefreshMs >= kBatteryRefreshMs) {
     refreshBattery();
   }
 
-  appState.update(millis());
+  appState.update(nowMs);
   displayRenderer.render(appState);
   delay(10);
 }

@@ -28,7 +28,21 @@ struct AgentStatusMessageTests {
         #expect(String(decoding: data.dropFirst(8).prefix(11), as: UTF8.self) == "FIRMWARE CI")
         #expect(Array(data.dropFirst(19).prefix(2)) == [8, 5])
         #expect(String(decoding: data.dropFirst(21).prefix(8), as: UTF8.self) == "OPUS 4.7")
-        #expect(String(decoding: data.suffix(5), as: UTF8.self) == "XHIGH")
+        #expect(String(decoding: data.dropFirst(29).prefix(5), as: UTF8.self) == "XHIGH")
+        #expect(Array(data.suffix(5)) == [0, 0, 0, 0, 0])
+    }
+
+    @Test("Encodes display timeout and activity marker")
+    func encodesDisplaySettings() throws {
+        var snapshot = AgentSnapshot.idle
+        snapshot.updatedAt = Date(timeIntervalSince1970: 1.234)
+
+        let data = try AgentStatusMessageEncoder.encode(
+            snapshot,
+            screenTimeout: .fiveMinutes
+        )
+
+        #expect(Array(data.suffix(5)) == [5, 0, 0, 4, 210])
     }
 
     @Test("Unknown metrics use the sentinel value")
@@ -333,6 +347,29 @@ struct CompanionViewModelTests {
         #expect(preferences.defaultTool == .codex)
     }
 
+    @Test("Persists and sends the configured display timeout")
+    func persistsAndSendsDisplayTimeout() throws {
+        let preferences = MemoryAgentPreferenceStore()
+        let transport = MockBLETransport()
+        let monitor = MockAgentStatusMonitor()
+        let model = makeModel(
+            transport: transport,
+            monitor: monitor,
+            preferenceStore: preferences
+        )
+        transport.onStateChange?(.connected(UUID()))
+        monitor.onSnapshots?([.idle])
+
+        model.displaySleepTimeout = .tenMinutes
+
+        #expect(preferences.displaySleepTimeout == .tenMinutes)
+        let expected = try AgentStatusMessageEncoder.encode(
+            .idle,
+            screenTimeout: .tenMinutes
+        )
+        #expect(transport.sentPackets.last == expected)
+    }
+
     @Test("Manual pairing is saved only after service discovery succeeds")
     func manualPairIsSavedOnlyAfterTransportIsReady() {
         let transport = MockBLETransport()
@@ -465,6 +502,7 @@ private final class MemoryPairedDeviceStore: PairedDeviceStoring {
 private final class MemoryAgentPreferenceStore: AgentPreferenceStoring {
     var selectedSource: AgentSource = .automatic
     var defaultTool: DefaultAgentTool = .claude
+    var displaySleepTimeout: DisplaySleepTimeout = .never
 }
 
 private final class MockAgentIntegrationManager: AgentIntegrationManaging {

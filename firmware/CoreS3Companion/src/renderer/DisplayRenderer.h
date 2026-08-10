@@ -15,6 +15,7 @@ class DisplayRenderer {
 
  private:
   std::string lastSignature_;
+  bool displayAwake_ = true;
 };
 
 }  // namespace renderer

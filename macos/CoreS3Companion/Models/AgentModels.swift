@@ -40,6 +40,25 @@ enum DefaultAgentTool: String, CaseIterable, Codable, Identifiable {
     var displayName: String { source.displayName }
 }
 
+enum DisplaySleepTimeout: UInt8, CaseIterable, Codable, Identifiable {
+    case never = 0
+    case oneMinute = 1
+    case threeMinutes = 3
+    case fiveMinutes = 5
+    case tenMinutes = 10
+    case fifteenMinutes = 15
+    case thirtyMinutes = 30
+
+    var id: UInt8 { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .never: "不熄屏"
+        default: "\(rawValue) 分钟"
+        }
+    }
+}
+
 enum AgentRunState: UInt8, Codable, CaseIterable {
     case idle = 0
     case running = 1

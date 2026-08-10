@@ -52,6 +52,11 @@ void testParsesExtendedAgentStatus() {
   frame.push_back(static_cast<std::uint8_t>(std::strlen(effort)));
   frame.insert(frame.end(), model, model + std::strlen(model));
   frame.insert(frame.end(), effort, effort + std::strlen(effort));
+  frame.push_back(5);
+  frame.push_back(0x12);
+  frame.push_back(0x34);
+  frame.push_back(0x56);
+  frame.push_back(0x78);
 
   companion::protocol::AgentStatusMessage message;
   TEST_ASSERT_EQUAL_INT(
@@ -61,6 +66,19 @@ void testParsesExtendedAgentStatus() {
   TEST_ASSERT_EQUAL_STRING(title, message.title);
   TEST_ASSERT_EQUAL_STRING(model, message.modelName);
   TEST_ASSERT_EQUAL_STRING(effort, message.effort);
+  TEST_ASSERT_EQUAL_UINT8(5, message.displayTimeoutMinutes);
+  TEST_ASSERT_EQUAL_UINT32(0x12345678, message.activityToken);
+}
+
+void testAgentStatusRejectsInvalidDisplayTimeout() {
+  const std::uint8_t frame[] = {0x01, 0x02, 0x00, 0x01, 0xFF,
+                                0xFF, 0xFF, 0x00, 0x00, 0x00,
+                                31,   0x00, 0x00, 0x00, 0x01};
+  companion::protocol::AgentStatusMessage message;
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(AgentParseResult::kInvalidDisplayTimeout),
+      static_cast<int>(companion::protocol::parseAgentStatus(
+          frame, sizeof(frame), message)));
 }
 
 void testAgentStatusAcceptsUnknownMetrics() {
@@ -153,11 +171,72 @@ void testDisconnectImmediatelyHidesAgentStatus() {
   TEST_ASSERT_FALSE(state.hasFreshStatus());
 }
 
+void testDisplaySleepsAfterConfiguredInactivity() {
+  companion::app::CompanionState state;
+  companion::protocol::AgentStatusMessage message;
+  message.displayTimeoutMinutes = 1;
+  message.activityToken = 100;
+  state.setConnected(true);
+  state.setAgentStatus(message, 1000);
+
+  state.update(60999);
+  TEST_ASSERT_TRUE(state.isDisplayAwake());
+  state.update(61000);
+  TEST_ASSERT_FALSE(state.isDisplayAwake());
+}
+
+void testRepeatedStatusDoesNotPostponeDisplaySleep() {
+  companion::app::CompanionState state;
+  companion::protocol::AgentStatusMessage message;
+  message.displayTimeoutMinutes = 1;
+  message.activityToken = 100;
+  state.setConnected(true);
+  state.setAgentStatus(message, 1000);
+  state.setAgentStatus(message, 50000);
+
+  state.update(61000);
+  TEST_ASSERT_FALSE(state.isDisplayAwake());
+}
+
+void testNewMessageAndTouchWakeDisplay() {
+  companion::app::CompanionState state;
+  companion::protocol::AgentStatusMessage message;
+  message.displayTimeoutMinutes = 1;
+  message.activityToken = 100;
+  state.setConnected(true);
+  state.setAgentStatus(message, 1000);
+  state.update(61000);
+  TEST_ASSERT_FALSE(state.isDisplayAwake());
+
+  message.activityToken = 101;
+  state.setAgentStatus(message, 62000);
+  TEST_ASSERT_TRUE(state.isDisplayAwake());
+  state.update(122000);
+  TEST_ASSERT_FALSE(state.isDisplayAwake());
+
+  state.recordLocalActivity(123000);
+  TEST_ASSERT_TRUE(state.isDisplayAwake());
+  state.update(183000);
+  TEST_ASSERT_FALSE(state.isDisplayAwake());
+}
+
+void testNeverSleepKeepsDisplayAwake() {
+  companion::app::CompanionState state;
+  companion::protocol::AgentStatusMessage message;
+  message.displayTimeoutMinutes = 0;
+  state.setConnected(true);
+  state.setAgentStatus(message, 1000);
+
+  state.update(0xFFFFFFFF);
+  TEST_ASSERT_TRUE(state.isDisplayAwake());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(testParsesLegacyCpuUsage);
   RUN_TEST(testParsesAgentStatus);
   RUN_TEST(testParsesExtendedAgentStatus);
+  RUN_TEST(testAgentStatusRejectsInvalidDisplayTimeout);
   RUN_TEST(testAgentStatusAcceptsUnknownMetrics);
   RUN_TEST(testAgentStatusAcceptsChineseUtf8Title);
   RUN_TEST(testAgentStatusRejectsInvalidUtf8Title);
@@ -166,5 +245,9 @@ int main(int, char**) {
   RUN_TEST(testAgentStatusRejectsInvalidMetric);
   RUN_TEST(testAgentStatusBecomesStaleAfterThreeSeconds);
   RUN_TEST(testDisconnectImmediatelyHidesAgentStatus);
+  RUN_TEST(testDisplaySleepsAfterConfiguredInactivity);
+  RUN_TEST(testRepeatedStatusDoesNotPostponeDisplaySleep);
+  RUN_TEST(testNewMessageAndTouchWakeDisplay);
+  RUN_TEST(testNeverSleepKeepsDisplayAwake);
   return UNITY_END();
 }

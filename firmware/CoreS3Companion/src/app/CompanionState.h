@@ -14,11 +14,13 @@ class CompanionState {
   void setConnected(bool connected);
   void setAgentStatus(const protocol::AgentStatusMessage& status,
                       std::uint32_t nowMs);
+  void recordLocalActivity(std::uint32_t nowMs);
   void setBatteryLevel(std::uint8_t batteryLevel);
   void update(std::uint32_t nowMs);
 
   bool isConnected() const;
   bool hasFreshStatus() const;
+  bool isDisplayAwake() const;
   const protocol::AgentStatusMessage& status() const;
   std::uint8_t batteryLevel() const;
 
@@ -28,8 +30,9 @@ class CompanionState {
   protocol::AgentStatusMessage status_;
   std::uint8_t batteryLevel_ = protocol::kUnknownMetricValue;
   std::uint32_t lastSampleMs_ = 0;
+  std::uint32_t lastActivityMs_ = 0;
+  bool displayAwake_ = true;
 };
 
 }  // namespace app
 }  // namespace companion
-
