@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240" role="img" aria-labelledby="title desc" shape-rendering="crispEdges">
+  <title id="title">Claude state — waiting for authorization</title>
+  <desc id="desc">Claude is waiting for tool authorization. The screen includes the conversation title, quotas, context usage, and battery.</desc>
+  <defs><style>.ui{font-family:Silkscreen,Monaco,monospace}.meta{font-size:11px;letter-spacing:.4px}.title{font-size:14px;font-weight:700}.state{font-size:36px;font-weight:700;letter-spacing:2px}.value{font-size:12px;font-weight:700}</style></defs>
+  <rect width="320" height="240" fill="#000000"/>
+  <text x="16" y="23" class="ui meta" fill="#7C8782">CLAUDE</text><text x="304" y="23" class="ui meta" text-anchor="end" fill="#F2F5F3">BAT 81%</text>
+  <path d="M16 34h288" stroke="#173128"/><text x="16" y="57" class="ui title" fill="#F2F5F3">UPDATE FIRMWARE CI</text>
+  <rect x="16" y="77" width="8" height="48" fill="#FFC857"/><text x="40" y="117" class="ui state" fill="#FFC857">AUTH</text><text x="212" y="116" class="ui meta" fill="#FFC857">ALLOW?</text>
+  <path d="M16 144h288" stroke="#173128"/>
+  <g class="ui"><text x="16" y="168" class="value" fill="#F2F5F3">5H 54%</text><rect x="16" y="178" width="86" height="6" fill="#173128"/><rect x="16" y="178" width="46" height="6" fill="#FFC857"/><text x="117" y="168" class="value" fill="#F2F5F3">WK 39%</text><rect x="117" y="178" width="86" height="6" fill="#173128"/><rect x="117" y="178" width="34" height="6" fill="#FFC857"/><text x="218" y="168" class="value" fill="#F2F5F3">CTX 64%</text><rect x="218" y="178" width="86" height="6" fill="#173128"/><rect x="218" y="178" width="55" height="6" fill="#FFC857"/></g>
+  <rect x="16" y="211" width="7" height="7" fill="#FFC857"/><text x="34" y="219" class="ui meta" fill="#FFC857">BLOCKED</text><text x="304" y="219" class="ui meta" text-anchor="end" fill="#7C8782">TOOL</text>
+</svg>
+

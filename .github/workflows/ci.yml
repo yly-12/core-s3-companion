@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  firmware:
+    name: Firmware build and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: .github/requirements-platformio.txt
+
+      - name: Cache PlatformIO downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio/.cache
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/CoreS3Companion/platformio.ini', '.github/requirements-platformio.txt') }}
+
+      - name: Install PlatformIO Core
+        run: python -m pip install --requirement .github/requirements-platformio.txt
+
+      - name: Run firmware unit tests
+        run: pio test --project-dir firmware/CoreS3Companion --environment native
+
+      - name: Build CoreS3 firmware
+        run: pio run --project-dir firmware/CoreS3Companion --environment m5stack-cores3
+
+      - name: Upload firmware build
+        uses: actions/upload-artifact@v7
+        with:
+          name: firmware-ci
+          path: |
+            firmware/CoreS3Companion/.pio/build/m5stack-cores3/firmware.bin
+            firmware/CoreS3Companion/.pio/build/m5stack-cores3/firmware-factory.bin
+          if-no-files-found: error
+          retention-days: 7
+
+  macos:
+    name: macOS build and tests
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build and test macOS app
+        run: >-
+          xcodebuild test
+          -project macos/CoreS3Companion/CoreS3Companion.xcodeproj
+          -scheme CoreS3Companion
+          -configuration Debug
+          -destination 'platform=macOS'
+          -derivedDataPath "$RUNNER_TEMP/CoreS3CompanionDerivedData"
+          CODE_SIGNING_ALLOWED=NO

@@ -1,0 +1,204 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-tag:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require vMAJOR.MINOR.PATCH
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag must use vMAJOR.MINOR.PATCH, for example v0.0.1"
+            exit 1
+          fi
+
+  firmware:
+    name: Package firmware
+    needs: validate-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: .github/requirements-platformio.txt
+
+      - name: Cache PlatformIO downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio/.cache
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/CoreS3Companion/platformio.ini', '.github/requirements-platformio.txt') }}
+
+      - name: Install PlatformIO Core
+        run: python -m pip install --requirement .github/requirements-platformio.txt
+
+      - name: Run firmware unit tests
+        run: pio test --project-dir firmware/CoreS3Companion --environment native
+
+      - name: Build release firmware
+        run: pio run --project-dir firmware/CoreS3Companion --environment m5stack-cores3
+
+      - name: Stage firmware assets
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p release-assets
+          cp firmware/CoreS3Companion/.pio/build/m5stack-cores3/firmware.bin \
+            "release-assets/CoreS3Companion-${RELEASE_TAG}-app.bin"
+          cp firmware/CoreS3Companion/.pio/build/m5stack-cores3/firmware-factory.bin \
+            "release-assets/CoreS3Companion-${RELEASE_TAG}-factory.bin"
+
+      - name: Upload firmware assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-firmware
+          path: release-assets/*
+          if-no-files-found: error
+
+  macos:
+    name: Package ad-hoc signed macOS app
+    needs: validate-tag
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build and test macOS app
+        run: >-
+          xcodebuild test
+          -project macos/CoreS3Companion/CoreS3Companion.xcodeproj
+          -scheme CoreS3Companion
+          -configuration Debug
+          -destination 'platform=macOS'
+          -derivedDataPath "$RUNNER_TEMP/CoreS3CompanionDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Archive unsigned app
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          archive_path="$RUNNER_TEMP/CoreS3Companion.xcarchive"
+
+          xcodebuild archive \
+            -project macos/CoreS3Companion/CoreS3Companion.xcodeproj \
+            -scheme CoreS3Companion \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -archivePath "$archive_path" \
+            -derivedDataPath "$RUNNER_TEMP/CoreS3CompanionDerivedData" \
+            MARKETING_VERSION="$version" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+          app_path="$archive_path/Products/Applications/CoreS3Companion.app"
+          if [[ ! -d "$app_path" ]]; then
+            echo "::error::Archived app was not found at $app_path"
+            exit 1
+          fi
+          echo "RELEASE_APP_PATH=$app_path" >> "$GITHUB_ENV"
+
+      - name: Apply ad-hoc signature
+        run: |
+          codesign --force \
+            --sign - \
+            --options runtime \
+            --entitlements macos/CoreS3Companion/App/CoreS3Companion.entitlements \
+            "$RELEASE_APP_PATH"
+
+          codesign --verify --deep --strict --verbose=2 "$RELEASE_APP_PATH"
+          codesign --display --entitlements - "$RELEASE_APP_PATH"
+
+      - name: Create unsigned DMG
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          staging="$RUNNER_TEMP/dmg-staging"
+          dmg_path="$RUNNER_TEMP/CoreS3Companion-${RELEASE_TAG}-macOS-unsigned.dmg"
+          mkdir -p "$staging"
+          ditto "$RELEASE_APP_PATH" "$staging/CoreS3 Companion.app"
+          ln -s /Applications "$staging/Applications"
+
+          hdiutil create \
+            -volname "CoreS3 Companion" \
+            -srcfolder "$staging" \
+            -format UDZO \
+            -ov "$dmg_path"
+          hdiutil verify "$dmg_path"
+          echo "RELEASE_DMG_PATH=$dmg_path" >> "$GITHUB_ENV"
+
+      - name: Stage macOS asset
+        run: |
+          mkdir -p release-assets
+          ditto "$RELEASE_DMG_PATH" "release-assets/$(basename "$RELEASE_DMG_PATH")"
+
+      - name: Upload macOS asset
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-macos
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - firmware
+      - macos
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download release assets
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate SHA-256 checksums
+        working-directory: release-assets
+        run: sha256sum * > SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: >-
+          gh release create "$RELEASE_TAG"
+          release-assets/*
+          --verify-tag
+          --generate-notes
+          --notes "注意：macOS DMG 未经 Apple 公证。首次打开应用后，请前往系统设置 → 隐私与安全性 → 安全性，点击‘仍要打开’。可使用 SHA256SUMS.txt 校验下载文件。"
+          --title "CoreS3 Companion ${RELEASE_TAG}"

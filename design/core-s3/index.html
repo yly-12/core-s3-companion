@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CoreS3 Claude Status UI</title>
+  <style>
+    :root { color-scheme: dark; font-family: Monaco, Menlo, monospace; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #080b09; color: #f2f5f3; }
+    main { width: min(1120px, calc(100% - 40px)); margin: 56px auto 80px; }
+    h1 { margin: 0; font-size: 28px; letter-spacing: .04em; }
+    .intro { max-width: 780px; color: #8b9691; line-height: 1.7; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 28px; margin-top: 36px; }
+    article { padding: 18px; border: 1px solid #173128; background: #101814; border-radius: 8px; }
+    h2 { margin: 0 0 6px; font-size: 14px; color: #46f59a; }
+    p { margin: 0 0 14px; font-size: 12px; color: #7c8782; }
+    object { display: block; width: 100%; aspect-ratio: 4 / 3; background: #000; image-rendering: pixelated; }
+    code { color: #ffc857; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>CoreS3 / Claude Status UI</h1>
+    <p class="intro">所有设备画面均为原生 <code>320 × 240</code> SVG。最小字号约为 <code>11px</code>，并以 <code>5H / WK / CTX / BAT</code> 缩写压缩信息。V1 不包含触摸控件。</p>
+    <section class="grid">
+      <article><h2>01 / Minimal Status</h2><p>推荐主方向 · RUN</p><object data="01-minimal-status.svg" type="image/svg+xml"></object></article>
+      <article><h2>02 / Telemetry Status</h2><p>较高信息密度 · RUN</p><object data="02-telemetry-status.svg" type="image/svg+xml"></object></article>
+      <article><h2>03 / Pixel Terminal</h2><p>复古终端方向 · RUN</p><object data="03-pixel-terminal-status.svg" type="image/svg+xml"></object></article>
+      <article><h2>04 / Idle</h2><p>空闲，等待新任务</p><object data="04-state-idle.svg" type="image/svg+xml"></object></article>
+      <article><h2>05 / Authorization</h2><p>等待用户授权工具操作</p><object data="05-state-authorization.svg" type="image/svg+xml"></object></article>
+      <article><h2>06 / Reply</h2><p>等待用户回复</p><object data="06-state-reply.svg" type="image/svg+xml"></object></article>
+      <article><h2>07 / Complete</h2><p>任务已经完成</p><object data="07-state-complete.svg" type="image/svg+xml"></object></article>
+    </section>
+  </main>
+</body>
+</html>

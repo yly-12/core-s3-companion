@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240" role="img" aria-labelledby="title desc" shape-rendering="crispEdges">
+  <title id="title">Claude state — waiting for user reply</title>
+  <desc id="desc">Claude is waiting for a user reply. The screen includes the conversation title, quotas, context usage, and battery.</desc>
+  <defs><style>.ui{font-family:Silkscreen,Monaco,monospace}.meta{font-size:11px;letter-spacing:.4px}.title{font-size:14px;font-weight:700}.state{font-size:34px;font-weight:700;letter-spacing:1px}.value{font-size:12px;font-weight:700}</style></defs>
+  <rect width="320" height="240" fill="#000000"/>
+  <text x="16" y="23" class="ui meta" fill="#7C8782">CLAUDE</text><text x="304" y="23" class="ui meta" text-anchor="end" fill="#F2F5F3">BAT 80%</text>
+  <path d="M16 34h288" stroke="#173128"/><text x="16" y="57" class="ui title" fill="#F2F5F3">CHOOSING UI STYLE</text>
+  <rect x="16" y="77" width="8" height="48" fill="#58A6FF"/><text x="40" y="117" class="ui state" fill="#58A6FF">REPLY</text><text x="224" y="116" class="ui meta" fill="#58A6FF">USER</text>
+  <path d="M16 144h288" stroke="#173128"/>
+  <g class="ui"><text x="16" y="168" class="value" fill="#F2F5F3">5H 51%</text><rect x="16" y="178" width="86" height="6" fill="#173128"/><rect x="16" y="178" width="44" height="6" fill="#58A6FF"/><text x="117" y="168" class="value" fill="#F2F5F3">WK 38%</text><rect x="117" y="178" width="86" height="6" fill="#173128"/><rect x="117" y="178" width="33" height="6" fill="#58A6FF"/><text x="218" y="168" class="value" fill="#F2F5F3">CTX 67%</text><rect x="218" y="178" width="86" height="6" fill="#173128"/><rect x="218" y="178" width="58" height="6" fill="#58A6FF"/></g>
+  <rect x="16" y="211" width="7" height="7" fill="#58A6FF"/><text x="34" y="219" class="ui meta" fill="#58A6FF">YOUR TURN</text><text x="304" y="219" class="ui meta" text-anchor="end" fill="#7C8782">05M</text>
+</svg>
+

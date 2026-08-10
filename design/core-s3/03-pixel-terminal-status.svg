@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240" role="img" aria-labelledby="title desc" shape-rendering="crispEdges">
+  <title id="title">Pixel Terminal Status — Claude is running</title>
+  <desc id="desc">A retro terminal-style Claude status screen with readable running, conversation, quota, context, and battery information.</desc>
+  <defs>
+    <style>
+      .ui { font-family: Silkscreen, Monaco, monospace; }
+      .meta { font-size: 11px; letter-spacing: .25px; }
+      .title { font-size: 14px; font-weight: 700; }
+      .state { font-size: 30px; font-weight: 700; letter-spacing: 1px; }
+      .metric { font-size: 12px; font-weight: 700; }
+    </style>
+    <pattern id="scan" width="1" height="5" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="#173128" opacity=".42"/></pattern>
+  </defs>
+  <rect width="320" height="240" fill="#000000"/>
+  <rect width="320" height="240" fill="url(#scan)"/>
+  <rect x="10" y="10" width="300" height="220" fill="none" stroke="#173128" stroke-width="2"/>
+  <path d="M10 40h300M10 184h300" stroke="#173128"/>
+  <rect x="20" y="21" width="7" height="7" fill="#46F59A"/>
+  <text x="38" y="29" class="ui meta" fill="#46F59A">CLAUDE / SESSION</text>
+  <text x="300" y="29" class="ui meta" text-anchor="end" fill="#F2F5F3">B83</text>
+  <text x="22" y="64" class="ui title" fill="#F2F5F3">CORES3 STATUS UI</text>
+  <text x="22" y="105" class="ui state" fill="#46F59A">&gt; RUN</text>
+  <text x="24" y="128" class="ui meta" fill="#7C8782">WORKING / EDIT SVG</text>
+  <path d="M22 143h276" stroke="#173128"/>
+  <g class="ui">
+    <text x="22" y="169" class="metric" fill="#F2F5F3">5H 68%</text>
+    <text x="116" y="169" class="metric" fill="#F2F5F3">WK 42%</text>
+    <text x="212" y="169" class="metric" fill="#FFC857">CTX 61%</text>
+  </g>
+  <text x="22" y="210" class="ui meta" fill="#7C8782">SYNC</text>
+  <text x="76" y="210" class="ui metric" fill="#46F59A">OK</text>
+  <text x="176" y="210" class="ui meta" fill="#7C8782">AGE</text>
+  <text x="300" y="210" class="ui metric" text-anchor="end" fill="#F2F5F3">01S</text>
+</svg>
