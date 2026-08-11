@@ -29,7 +29,7 @@ struct AgentStatusMessageTests {
         #expect(Array(data.dropFirst(19).prefix(2)) == [8, 5])
         #expect(String(decoding: data.dropFirst(21).prefix(8), as: UTF8.self) == "OPUS 4.7")
         #expect(String(decoding: data.dropFirst(29).prefix(5), as: UTF8.self) == "XHIGH")
-        #expect(Array(data.suffix(5)) == [0, 0, 0, 0, 0])
+        #expect(Array(data.suffix(10)) == [0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF])
     }
 
     @Test("Encodes display timeout and activity marker")
@@ -39,10 +39,32 @@ struct AgentStatusMessageTests {
 
         let data = try AgentStatusMessageEncoder.encode(
             snapshot,
-            screenTimeout: .fiveMinutes
+            screenTimeoutOnBattery: .fiveMinutes
         )
 
-        #expect(Array(data.suffix(5)) == [5, 0, 0, 4, 210])
+        #expect(Array(data.suffix(10)) == [5, 0, 0, 0, 4, 210, 0xFF, 0xFF, 0xFF, 0xFF])
+    }
+
+    @Test("Encodes separate power timeouts and reset countdowns")
+    func encodesPowerTimeoutsAndResetCountdowns() throws {
+        var snapshot = AgentSnapshot.idle
+        let now = Date(timeIntervalSince1970: 1_000)
+        snapshot.fiveHourResetsAt = now.addingTimeInterval(134 * 60)
+        snapshot.weeklyResetsAt = now.addingTimeInterval(4_800 * 60)
+
+        let data = try AgentStatusMessageEncoder.encode(
+            snapshot,
+            screenTimeoutOnBattery: .fiveMinutes,
+            screenTimeoutOnExternalPower: .never,
+            now: now
+        )
+
+        #expect(Array(data.suffix(10)) == [5, 0, 0, 0, 0, 0, 0x00, 0x86, 0x12, 0xC0])
+        #expect(UsageResetCountdown.display(minutes: 134, weekly: false) == "2H14m")
+        #expect(UsageResetCountdown.display(minutes: 121, weekly: false) == "2H1m")
+        #expect(UsageResetCountdown.display(minutes: 4_800, weekly: true) == "3D8H")
+        #expect(UsageResetCountdown.display(minutes: 1_112, weekly: true) == "18H32m")
+        #expect(UsageResetCountdown.display(minutes: 48, weekly: false) == "0H48m")
     }
 
     @Test("Unknown metrics use the sentinel value")
@@ -106,7 +128,7 @@ struct AgentIntegrationManagerTests {
         try FileManager.default.createDirectory(at: claudeSessionsURL, withIntermediateDirectories: true)
         try jsonData([
             "sessionId": "claude-test-session",
-            "name": "中文会话标题",
+            "name": "core-s3-7a",
             "nameSource": "derived",
         ]).write(to: claudeSessionsURL.appendingPathComponent("12345.json"))
         try jsonData([
@@ -144,30 +166,54 @@ struct AgentIntegrationManagerTests {
                 "effort": ["level": "xhigh"],
                 "context_window": ["used_percentage": 37],
                 "rate_limits": [
-                    "five_hour": ["used_percentage": 12],
-                    "seven_day": ["used_percentage": 34],
+                    "five_hour": ["used_percentage": 12, "resets_at": 2_000_000_000],
+                    "seven_day": ["used_percentage": 34, "resets_at": 2_000_300_000],
                 ],
             ]
         )
         let state = try jsonObject(at: stateURL)
         #expect(state["state"] as? String == "waiting_authorization")
 
+        let claudeProjectsURL = root.appendingPathComponent("claude-projects/project", isDirectory: true)
+        try FileManager.default.createDirectory(at: claudeProjectsURL, withIntermediateDirectories: true)
+        let transcriptLines = [
+            jsonText(["type": "ai-title", "sessionId": "claude-test-session", "aiTitle": "实现 CoreS3 状态显示"]),
+            jsonText(["type": "ai-title", "sessionId": "claude-test-session", "aiTitle": "完善 CoreS3 状态显示"]),
+        ]
+        try transcriptLines.joined(separator: "\n").write(
+            to: claudeProjectsURL.appendingPathComponent("claude-test-session.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+
         let monitor = AgentStatusMonitor(
             stateDirectoryURL: support.appendingPathComponent("state"),
             codexSessionsURL: root.appendingPathComponent("no-codex-sessions"),
             claudeSessionsURL: claudeSessionsURL,
+            claudeProjectsURL: root.appendingPathComponent("claude-projects"),
+            claudeConfigurationURL: root.appendingPathComponent("no-claude-configuration"),
             codexSessionIndexURL: root.appendingPathComponent("no-codex-index")
         )
         monitor.selectedSource = .claude
         var snapshots: [AgentSnapshot] = []
         monitor.onSnapshots = { snapshots = $0 }
         monitor.refresh()
-        #expect(snapshots.first?.title == "中文会话标题")
+        #expect(snapshots.first?.title == "完善 CoreS3 状态显示")
         #expect(snapshots.first?.modelName == "Opus 5")
         #expect(snapshots.first?.effort == "xhigh")
         #expect(snapshots.first?.fiveHourRemaining == 88)
         #expect(snapshots.first?.weeklyRemaining == 66)
         #expect(snapshots.first?.contextUsed == 37)
+        #expect(snapshots.first?.fiveHourResetsAt == Date(timeIntervalSince1970: 2_000_000_000))
+        #expect(snapshots.first?.weeklyResetsAt == Date(timeIntervalSince1970: 2_000_300_000))
+
+        try jsonData([
+            "sessionId": "claude-test-session",
+            "name": "用户指定标题",
+            "nameSource": "custom",
+        ]).write(to: claudeSessionsURL.appendingPathComponent("12345.json"))
+        monitor.refresh()
+        #expect(snapshots.first?.title == "用户指定标题")
 
         try manager.uninstall(.claude)
         let restored = try jsonObject(at: settingsURL)
@@ -225,7 +271,11 @@ struct AgentStatusMonitorTests {
             try rolloutLine(type: "request_user_input", payload: ["prompt": "Choose a layout"]),
             try rolloutLine(type: "token_count", payload: [
                 "rate_limits": [
-                    "primary": ["used_percent": 32, "window_minutes": 10_080],
+                    "primary": [
+                        "used_percent": 32,
+                        "window_minutes": 10_080,
+                        "resets_at": 2_000_300_000,
+                    ],
                 ],
                 "info": [
                     "total_token_usage": ["total_tokens": 9_999_999],
@@ -246,6 +296,8 @@ struct AgentStatusMonitorTests {
             stateDirectoryURL: states,
             codexSessionsURL: root.appendingPathComponent("sessions"),
             claudeSessionsURL: root.appendingPathComponent("no-claude-sessions"),
+            claudeProjectsURL: root.appendingPathComponent("no-claude-projects"),
+            claudeConfigurationURL: root.appendingPathComponent("no-claude-configuration"),
             codexSessionIndexURL: sessionIndex
         )
         monitor.selectedSource = .codex
@@ -261,6 +313,7 @@ struct AgentStatusMonitorTests {
         #expect(snapshot?.fiveHourRemaining == nil)
         #expect(snapshot?.weeklyRemaining == 68)
         #expect(snapshot?.contextUsed == 61)
+        #expect(snapshot?.weeklyResetsAt == Date(timeIntervalSince1970: 2_000_300_000))
     }
 
     @Test("Returns multiple active sessions in alert priority order")
@@ -287,6 +340,8 @@ struct AgentStatusMonitorTests {
             stateDirectoryURL: root,
             codexSessionsURL: root.appendingPathComponent("no-codex"),
             claudeSessionsURL: root.appendingPathComponent("no-claude-sessions"),
+            claudeProjectsURL: root.appendingPathComponent("no-claude-projects"),
+            claudeConfigurationURL: root.appendingPathComponent("no-claude-configuration"),
             codexSessionIndexURL: root.appendingPathComponent("no-codex-index")
         )
         monitor.selectedSource = .claude
@@ -321,6 +376,8 @@ struct AgentStatusMonitorTests {
             stateDirectoryURL: root,
             codexSessionsURL: root.appendingPathComponent("no-rollouts"),
             claudeSessionsURL: root.appendingPathComponent("no-claude-sessions"),
+            claudeProjectsURL: root.appendingPathComponent("no-claude-projects"),
+            claudeConfigurationURL: root.appendingPathComponent("no-claude-configuration"),
             codexSessionIndexURL: root.appendingPathComponent("no-codex-index")
         )
         monitor.selectedSource = .automatic
@@ -332,10 +389,110 @@ struct AgentStatusMonitorTests {
         #expect(snapshots.first?.sessionID == "codex-idle")
         #expect(snapshots.first?.source == .codex)
     }
+
+    @Test("Reads Claude quotas and model-specific context from local caches")
+    func readsClaudeCachedUsageAndTranscriptContext() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("core-s3-claude-usage-\(UUID().uuidString)", isDirectory: true)
+        let states = root.appendingPathComponent("state", isDirectory: true)
+        let projects = root.appendingPathComponent("projects/workspace", isDirectory: true)
+        let configuration = root.appendingPathComponent(".claude.json")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: states, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
+
+        let sessionID = "claude-cached-session"
+        try jsonData([
+            "sessionID": sessionID,
+            "state": "running",
+            "title": "Claude usage",
+            "updatedAt": Date().timeIntervalSince1970,
+        ]).write(to: states.appendingPathComponent("claude-session-cached.json"))
+        try jsonData([
+            "cachedUsageUtilization": [
+                "fetchedAtMs": Date().timeIntervalSince1970 * 1_000,
+                "utilization": [
+                    "five_hour": ["utilization": 25],
+                    "seven_day": ["utilization": 40],
+                ],
+            ],
+        ]).write(to: configuration)
+        let transcriptLines = [
+            jsonText([
+                "type": "ai-title",
+                "sessionId": sessionID,
+                "aiTitle": "实现 Claude 会话标题读取",
+            ]),
+            jsonText([
+                "type": "assistant",
+                "message": [
+                    "model": "claude-opus-5",
+                    "usage": [
+                        "input_tokens": 1_000,
+                        "cache_creation_input_tokens": 49_000,
+                        "cache_read_input_tokens": 200_000,
+                        "output_tokens": 50_000,
+                    ],
+                ],
+            ]),
+        ]
+        try transcriptLines.joined(separator: "\n")
+            .write(
+                to: projects.appendingPathComponent("\(sessionID).jsonl"),
+                atomically: true,
+                encoding: .utf8
+            )
+        let transcript = ClaudeTranscriptReader.read(
+            from: projects.appendingPathComponent("\(sessionID).jsonl")
+        )
+        #expect(transcript?.aiTitle == "实现 Claude 会话标题读取")
+        #expect(transcript?.contextUsed == 30)
+
+        let monitor = AgentStatusMonitor(
+            stateDirectoryURL: states,
+            codexSessionsURL: root.appendingPathComponent("no-codex"),
+            claudeSessionsURL: root.appendingPathComponent("no-claude-sessions"),
+            claudeProjectsURL: root.appendingPathComponent("projects"),
+            claudeConfigurationURL: configuration,
+            codexSessionIndexURL: root.appendingPathComponent("no-codex-index")
+        )
+        monitor.selectedSource = .claude
+        var snapshot: AgentSnapshot?
+        monitor.onSnapshots = { snapshot = $0.first }
+        monitor.refresh()
+
+        #expect(snapshot?.title == "实现 Claude 会话标题读取")
+        #expect(snapshot?.modelName == "claude-opus-5")
+        #expect(snapshot?.fiveHourRemaining == 75)
+        #expect(snapshot?.weeklyRemaining == 60)
+        #expect(snapshot?.contextUsed == 30)
+    }
+
+    @Test("Uses explicit Claude model context windows")
+    func usesExplicitClaudeModelContextWindows() {
+        #expect(ClaudeModelContextWindow.tokens(for: "claude-opus-5") == 1_000_000)
+        #expect(ClaudeModelContextWindow.tokens(for: "claude-opus-4.7-20260801") == 1_000_000)
+        #expect(ClaudeModelContextWindow.tokens(for: "claude-sonnet-4-6") == 1_000_000)
+        #expect(ClaudeModelContextWindow.tokens(for: "claude-haiku-4-5") == 200_000)
+        #expect(ClaudeModelContextWindow.tokens(for: "claude-sonnet-4.5") == 200_000)
+        #expect(ClaudeModelContextWindow.tokens(for: "claude-future-unknown") == nil)
+    }
 }
 
 @Suite("Companion view model")
 struct CompanionViewModelTests {
+    @Test("Migrates the legacy timeout to battery and defaults external power to never")
+    func migratesPowerAwareDisplayTimeouts() {
+        let suiteName = "CoreS3CompanionTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(10, forKey: "displaySleepTimeoutMinutes")
+
+        let preferences = UserDefaultsAgentPreferenceStore(defaults: defaults)
+        #expect(preferences.displaySleepTimeoutOnBattery == .tenMinutes)
+        #expect(preferences.displaySleepTimeoutOnExternalPower == .never)
+    }
+
     @Test("Persists the configured default tool")
     func persistsDefaultTool() {
         let preferences = MemoryAgentPreferenceStore()
@@ -360,14 +517,24 @@ struct CompanionViewModelTests {
         transport.onStateChange?(.connected(UUID()))
         monitor.onSnapshots?([.idle])
 
-        model.displaySleepTimeout = .tenMinutes
+        model.displaySleepTimeoutOnBattery = .tenMinutes
 
-        #expect(preferences.displaySleepTimeout == .tenMinutes)
+        #expect(preferences.displaySleepTimeoutOnBattery == .tenMinutes)
         let expected = try AgentStatusMessageEncoder.encode(
             .idle,
-            screenTimeout: .tenMinutes
+            screenTimeoutOnBattery: .tenMinutes,
+            screenTimeoutOnExternalPower: .never
         )
         #expect(transport.sentPackets.last == expected)
+
+        model.displaySleepTimeoutOnExternalPower = .fifteenMinutes
+        #expect(preferences.displaySleepTimeoutOnExternalPower == .fifteenMinutes)
+        let poweredExpected = try AgentStatusMessageEncoder.encode(
+            .idle,
+            screenTimeoutOnBattery: .tenMinutes,
+            screenTimeoutOnExternalPower: .fifteenMinutes
+        )
+        #expect(transport.sentPackets.last == poweredExpected)
     }
 
     @Test("Manual pairing is saved only after service discovery succeeds")
@@ -430,7 +597,7 @@ struct CompanionViewModelTests {
         let second = AgentSnapshot(
             sessionID: "second",
             source: .codex,
-            state: .waitingReply,
+            state: .running,
             title: "第二个会话",
             fiveHourRemaining: nil,
             weeklyRemaining: 70,
@@ -446,6 +613,50 @@ struct CompanionViewModelTests {
             try AgentStatusMessageEncoder.encode(first),
             try AgentStatusMessageEncoder.encode(second),
         ])
+    }
+
+    @Test("Attention states preempt and pause session rotation")
+    func attentionStatesPreemptAndPauseRotation() {
+        #expect(AgentRunState.waitingAuthorization.requiresUserAttention)
+        #expect(AgentRunState.waitingReply.requiresUserAttention)
+        #expect(!AgentRunState.running.requiresUserAttention)
+
+        let transport = MockBLETransport()
+        let monitor = MockAgentStatusMonitor()
+        let model = makeModel(transport: transport, monitor: monitor)
+        transport.onStateChange?(.connected(UUID()))
+        let running = AgentSnapshot(
+            sessionID: "running",
+            source: .claude,
+            state: .running,
+            title: "普通会话",
+            fiveHourRemaining: nil,
+            weeklyRemaining: nil,
+            contextUsed: nil,
+            updatedAt: .now
+        )
+        var authorization = AgentSnapshot(
+            sessionID: "authorization",
+            source: .codex,
+            state: .waitingAuthorization,
+            title: "等待授权",
+            fiveHourRemaining: nil,
+            weeklyRemaining: nil,
+            contextUsed: nil,
+            updatedAt: .now
+        )
+
+        monitor.onSnapshots?([running])
+        monitor.onSnapshots?([authorization, running])
+        #expect(model.agentSnapshot.sessionID == authorization.sessionID)
+
+        model.rotateSession()
+        #expect(model.agentSnapshot.sessionID == authorization.sessionID)
+
+        authorization.state = .running
+        monitor.onSnapshots?([authorization, running])
+        model.rotateSession()
+        #expect(model.agentSnapshot.sessionID == running.sessionID)
     }
 }
 
@@ -502,7 +713,8 @@ private final class MemoryPairedDeviceStore: PairedDeviceStoring {
 private final class MemoryAgentPreferenceStore: AgentPreferenceStoring {
     var selectedSource: AgentSource = .automatic
     var defaultTool: DefaultAgentTool = .claude
-    var displaySleepTimeout: DisplaySleepTimeout = .never
+    var displaySleepTimeoutOnBattery: DisplaySleepTimeout = .never
+    var displaySleepTimeoutOnExternalPower: DisplaySleepTimeout = .never
 }
 
 private final class MockAgentIntegrationManager: AgentIntegrationManaging {

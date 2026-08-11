@@ -18,7 +18,7 @@
 Minimal Status 同时提供完整状态：
 
 - `04-state-idle.svg`：`IDLE`，空闲，可以接受新任务
-- `01-minimal-status.svg`：`RUN`，正在运行
+- `01-minimal-status.svg`：`RUNNING`，正在运行
 - `05-state-authorization.svg`：`AUTH`，等待工具授权
 - `06-state-reply.svg`：`REPLY`，等待用户回复
 - `07-state-complete.svg`：`DONE`，任务已经完成
@@ -26,7 +26,7 @@ Minimal Status 同时提供完整状态：
 状态使用固定颜色，避免只依赖文案：
 
 - `IDLE`：灰色 `#7C8782`
-- `RUN`：绿色 `#46F59A`
+- `RUNNING`：绿色 `#46F59A`
 - `AUTH`：黄色 `#FFC857`
 - `REPLY`：蓝色 `#58A6FF`
 - `DONE`：浅绿色 `#A7F3D0`
@@ -38,12 +38,23 @@ Minimal Status 同时提供完整状态：
 | `5H` | 五小时额度 | 显示剩余百分比 |
 | `WK` | Weekly 额度 | 显示剩余百分比 |
 | `CTX` | 当前对话 Context | 显示已占用百分比 |
-| `BAT` / `B` | CoreS3 电池 | 显示剩余百分比 |
+| `BAT` / `B` | CoreS3 电池 | 显示剩余百分比；充电时整组文字变为绿色 |
+| `2H14m` / `3D8H` | Usage 重置倒计时 | 5H 使用 `xHym`；Weekly 大于等于 24 小时使用 `xDyH`；数字不补前导 0 |
+| `SESSION` | Context 的作用域 | 表示 Context 随当前会话变化，没有定时重置 |
 | `EFF` | 当前 reasoning effort | 例如 `EFF XHIGH` |
 
 会话标题保持单行，客户端会按屏幕宽度截断。固件使用 M5GFX 的 `efontCN_16_b` 中文
 位图字体，因此可以直接显示 UTF-8 中英文标题。底栏左侧显示当前 session 模型名称，
 右侧显示 effort；字段不可用时显示 `MODEL -- / EFF --`。
+
+状态区只保留 `IDLE / RUNNING / AUTH / REPLY / DONE` 一个主词，不再重复显示 `READY`、
+`WORKING` 等同义说明。Usage 区每列依次显示百分比、进度条和重置倒计时，倒计时不显示
+额外前缀。5H 使用 `2H14m` 格式；Weekly 在剩余时间大于等于 24 小时
+时使用 `3D8H` 格式，小于 24 小时时同样切换为 `xHym`。各数字不补前导 0。Context 第二行显示 `SESSION`。
+
+电池状态位于顶栏右侧。外接电源并处于充电状态时，`BAT 83%`（Pixel Terminal 中
+缩写为 `B83`）整组使用运行绿 `#46F59A`；使用电池供电时显示为主文字白
+`#F2F5F3`。无障碍描述仍会明确标注是否正在充电。
 
 ## 字体与颜色
 

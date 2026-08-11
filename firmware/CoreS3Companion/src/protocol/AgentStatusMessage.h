@@ -11,9 +11,11 @@ constexpr std::size_t kAgentStatusHeaderSize = 8;
 constexpr std::size_t kMaximumTitleLength = 60;
 constexpr std::size_t kMaximumModelNameLength = 32;
 constexpr std::size_t kMaximumEffortLength = 8;
-constexpr std::size_t kDisplaySettingsLength = 5;
+constexpr std::size_t kLegacyDisplaySettingsLength = 5;
+constexpr std::size_t kDisplaySettingsLength = 10;
 constexpr std::uint8_t kMaximumDisplayTimeoutMinutes = 30;
 constexpr std::uint8_t kUnknownMetricValue = 0xFF;
+constexpr std::uint16_t kUnknownResetMinutes = 0xFFFF;
 
 enum class AgentRunState : std::uint8_t {
   kIdle = 0,
@@ -38,8 +40,11 @@ struct AgentStatusMessage {
   char title[kMaximumTitleLength + 1] = {};
   char modelName[kMaximumModelNameLength + 1] = {};
   char effort[kMaximumEffortLength + 1] = {};
-  std::uint8_t displayTimeoutMinutes = 0;
+  std::uint8_t displayTimeoutOnBatteryMinutes = 0;
+  std::uint8_t displayTimeoutOnExternalPowerMinutes = 0;
   std::uint32_t activityToken = 0;
+  std::uint16_t fiveHourResetMinutes = kUnknownResetMinutes;
+  std::uint16_t weeklyResetMinutes = kUnknownResetMinutes;
 };
 
 enum class AgentParseResult {

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240" role="img" aria-labelledby="title desc" shape-rendering="crispEdges">
   <title id="title">Minimal Status — Claude is running</title>
-  <desc id="desc">A two-inch Claude status display showing the conversation title, running state, five-hour and weekly quota, context usage, and battery.</desc>
+  <desc id="desc">A two-inch Claude status display showing one running-state label, five-hour and weekly quota with reset countdowns, context usage, and a battery that is charging.</desc>
   <defs>
     <style>
       .ui { font-family: Silkscreen, Monaco, monospace; }
@@ -12,20 +12,22 @@
   </defs>
   <rect width="320" height="240" fill="#000000"/>
   <text x="16" y="23" class="ui meta" fill="#7C8782">CLAUDE</text>
-  <text x="304" y="23" class="ui meta" text-anchor="end" fill="#F2F5F3">BAT 83%</text>
+  <text x="304" y="23" class="ui meta" text-anchor="end" fill="#46F59A" aria-label="Battery 83 percent, charging">BAT 83%</text>
   <path d="M16 34h288" stroke="#173128"/>
   <text x="16" y="57" class="ui title" fill="#F2F5F3">CORES3 STATUS UI</text>
   <rect x="16" y="77" width="8" height="48" fill="#46F59A"/>
-  <text x="40" y="117" class="ui state" fill="#46F59A">RUN</text>
-  <text x="202" y="116" class="ui meta" fill="#7C8782">WORKING</text>
+  <text x="40" y="117" class="ui state" fill="#46F59A">RUNNING</text>
   <path d="M16 144h288" stroke="#173128"/>
   <g class="ui">
     <text x="16" y="168" class="value" fill="#F2F5F3">5H 68%</text>
     <rect x="16" y="178" width="86" height="6" fill="#173128"/><rect x="16" y="178" width="58" height="6" fill="#46F59A"/>
+    <text x="16" y="201" class="meta" fill="#7C8782">2H14m</text>
     <text x="117" y="168" class="value" fill="#F2F5F3">WK 42%</text>
     <rect x="117" y="178" width="86" height="6" fill="#173128"/><rect x="117" y="178" width="36" height="6" fill="#46F59A"/>
+    <text x="117" y="201" class="meta" fill="#7C8782">3D8H</text>
     <text x="218" y="168" class="value" fill="#F2F5F3">CTX 61%</text>
     <rect x="218" y="178" width="86" height="6" fill="#173128"/><rect x="218" y="178" width="52" height="6" fill="#FFC857"/>
+    <text x="218" y="201" class="meta" fill="#7C8782">SESSION</text>
   </g>
   <text x="16" y="219" class="ui meta" fill="#F2F5F3">OPUS 4.7</text>
   <text x="304" y="219" class="ui meta" text-anchor="end" fill="#7C8782">EFF XHIGH</text>

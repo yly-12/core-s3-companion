@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240" role="img" aria-labelledby="title desc" shape-rendering="crispEdges">
   <title id="title">Telemetry Status — Claude is running</title>
-  <desc id="desc">A compact Claude telemetry dashboard with a large running state and readable quota, context, battery, and conversation information.</desc>
+  <desc id="desc">A compact Claude telemetry dashboard with one running-state label, quota reset countdowns, context, charging battery, and conversation information.</desc>
   <defs>
     <style>
       .ui { font-family: Silkscreen, Monaco, monospace; }
@@ -14,23 +14,25 @@
   <rect width="320" height="240" fill="#000000"/>
   <rect width="320" height="240" fill="url(#grid)" opacity=".35"/>
   <path d="M12 12h12M12 12v12M308 12h-12M308 12v12M12 228h12M12 228v-12M308 228h-12M308 228v-12" fill="none" stroke="#46F59A" stroke-width="2"/>
-  <text x="20" y="28" class="ui meta" fill="#46F59A">CLAUDE / RUN</text>
-  <text x="300" y="28" class="ui meta" text-anchor="end" fill="#F2F5F3">BAT 83%</text>
+  <text x="20" y="28" class="ui meta" fill="#46F59A">CLAUDE / RUNNING</text>
+  <text x="300" y="28" class="ui meta" text-anchor="end" fill="#46F59A" aria-label="Battery 83 percent, charging">BAT 83%</text>
   <text x="20" y="53" class="ui title" fill="#F2F5F3">CORES3 STATUS UI</text>
-  <rect x="20" y="68" width="174" height="96" fill="#101814" stroke="#173128"/>
+  <rect x="20" y="68" width="174" height="110" fill="#101814" stroke="#173128"/>
   <text x="34" y="91" class="ui meta" fill="#7C8782">STATE</text>
-  <text x="34" y="130" class="ui state" fill="#46F59A">RUN</text>
-  <text x="34" y="151" class="ui meta" fill="#F2F5F3">WORKING...</text>
-  <rect x="208" y="68" width="92" height="96" fill="#101814" stroke="#173128"/>
+  <text x="34" y="130" class="ui state" fill="#46F59A">RUNNING</text>
+  <rect x="208" y="68" width="92" height="110" fill="#101814" stroke="#173128"/>
   <g class="ui">
-    <text x="218" y="88" class="metric" fill="#F2F5F3">5H 68</text>
-    <rect x="218" y="96" width="72" height="5" fill="#173128"/><rect x="218" y="96" width="49" height="5" fill="#46F59A"/>
-    <text x="218" y="119" class="metric" fill="#F2F5F3">WK 42</text>
-    <rect x="218" y="127" width="72" height="5" fill="#173128"/><rect x="218" y="127" width="30" height="5" fill="#46F59A"/>
-    <text x="218" y="150" class="metric" fill="#F2F5F3">CTX 61</text>
+    <text x="218" y="83" class="metric" fill="#F2F5F3">5H 68</text>
+    <rect x="218" y="89" width="72" height="5" fill="#173128"/><rect x="218" y="89" width="49" height="5" fill="#46F59A"/>
+    <text x="218" y="105" class="meta" fill="#7C8782">2H14m</text>
+    <text x="218" y="117" class="metric" fill="#F2F5F3">WK 42</text>
+    <rect x="218" y="123" width="72" height="5" fill="#173128"/><rect x="218" y="123" width="30" height="5" fill="#46F59A"/>
+    <text x="218" y="138" class="meta" fill="#7C8782">3D8H</text>
+    <text x="218" y="151" class="metric" fill="#F2F5F3">CTX 61</text>
     <rect x="218" y="157" width="72" height="5" fill="#173128"/><rect x="218" y="157" width="44" height="5" fill="#FFC857"/>
+    <text x="218" y="172" class="meta" fill="#7C8782">SESSION</text>
   </g>
-  <path d="M20 181h280" stroke="#173128"/>
-  <text x="20" y="205" class="ui metric" fill="#F2F5F3">OPUS 4.7</text>
-  <text x="300" y="205" class="ui meta" text-anchor="end" fill="#7C8782">EFF XHIGH</text>
+  <path d="M20 188h280" stroke="#173128"/>
+  <text x="20" y="212" class="ui metric" fill="#F2F5F3">OPUS 4.7</text>
+  <text x="300" y="212" class="ui meta" text-anchor="end" fill="#7C8782">EFF XHIGH</text>
 </svg>

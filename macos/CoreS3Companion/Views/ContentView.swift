@@ -249,9 +249,6 @@ private struct AgentPreviewCard: View {
                     Text(snapshot.state.shortLabel)
                         .font(.system(size: 42, weight: .bold, design: .monospaced))
                         .foregroundStyle(stateColor)
-                    Text(snapshot.state.displayName)
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
                     Spacer()
                 }
                 Text(snapshot.title)
@@ -259,10 +256,19 @@ private struct AgentPreviewCard: View {
                     .lineLimit(1)
                 HStack(spacing: 10) {
                     if snapshot.source != .codex || snapshot.fiveHourRemaining != nil {
-                        MetricPill(label: "5H", value: snapshot.fiveHourRemaining)
+                        MetricPill(
+                            label: "5H",
+                            value: snapshot.fiveHourRemaining,
+                            resetAt: snapshot.fiveHourResetsAt
+                        )
                     }
-                    MetricPill(label: "WK", value: snapshot.weeklyRemaining)
-                    MetricPill(label: "CTX", value: snapshot.contextUsed)
+                    MetricPill(
+                        label: "WK",
+                        value: snapshot.weeklyRemaining,
+                        resetAt: snapshot.weeklyResetsAt,
+                        weekly: true
+                    )
+                    MetricPill(label: "CTX", value: snapshot.contextUsed, detail: "SESSION")
                 }
                 Divider()
                 HStack(spacing: 8) {
@@ -320,14 +326,21 @@ private struct ConfigurationSettingsView: View {
 
             GroupBox("屏幕") {
                 VStack(alignment: .leading, spacing: 12) {
-                    Picker("自动熄屏", selection: $model.displaySleepTimeout) {
+                    Picker("未接电源", selection: $model.displaySleepTimeoutOnBattery) {
                         ForEach(DisplaySleepTimeout.allCases) { timeout in
                             Text(timeout.displayName).tag(timeout)
                         }
                     }
                     .pickerStyle(.menu)
 
-                    Text("从最后一次 Claude/Codex 状态更新开始计时；新消息或点击 CoreS3 屏幕会立即唤醒并重新计时。")
+                    Picker("已接电源", selection: $model.displaySleepTimeoutOnExternalPower) {
+                        ForEach(DisplaySleepTimeout.allCases) { timeout in
+                            Text(timeout.displayName).tag(timeout)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Text("分别设置使用电池和接入电源时的自动熄屏时间；接入电源默认不熄屏。新消息、供电状态变化或点击 CoreS3 屏幕会立即唤醒并重新计时。")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -343,13 +356,23 @@ private struct ConfigurationSettingsView: View {
 private struct MetricPill: View {
     let label: String
     let value: UInt8?
+    var resetAt: Date? = nil
+    var weekly = false
+    var detail: String? = nil
 
     var body: some View {
-        HStack(spacing: 5) {
-            Text(label).foregroundStyle(.secondary)
-            Text(value.map { "\($0)%" } ?? "--")
-                .fontWeight(.semibold)
-                .monospacedDigit()
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 5) {
+                Text(label).foregroundStyle(.secondary)
+                Text(value.map { "\($0)%" } ?? "--")
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+            }
+            if let detail = detail ?? UsageResetCountdown.display(until: resetAt, weekly: weekly) {
+                Text(detail)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)

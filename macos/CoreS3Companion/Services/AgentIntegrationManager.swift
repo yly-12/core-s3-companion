@@ -25,7 +25,7 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
 
     private let originalClaudeStatusLineKey = "_coreS3CompanionOriginalStatusLine"
     private let managedScriptNeedle = "core-s3-agent-hook.js"
-    private let managedAssetMarker = "core-s3-hook-schema-v4"
+    private let managedAssetMarker = "core-s3-hook-schema-v6"
 
     init(
         homeURL: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -49,7 +49,7 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
             return AgentIntegrationStatus(
                 kind: kind,
                 isInstalled: installed,
-                detail: installed ? "Hooks、额度和 Context 采集已启用" : "需要安装或更新 Claude 采集器",
+                detail: installed ? "Hooks、额度、重置时间和 Context 采集已启用" : "需要安装或更新 Claude 采集器",
                 configPath: url.path
             )
         case .codex:
@@ -60,7 +60,7 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
             return AgentIntegrationStatus(
                 kind: kind,
                 isInstalled: installed,
-                detail: installed ? "Hooks 已启用；额度从本地 rollout 被动读取" : "需要安装 Codex hooks",
+                detail: installed ? "Hooks 已启用；额度与重置时间从本地 rollout 被动读取" : "需要安装 Codex hooks",
                 configPath: codexConfigURL.path
             )
         }
@@ -372,7 +372,7 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
     }
 
     private static let jxaHookScript = #"""
-    // core-s3-hook-schema-v4
+    // core-s3-hook-schema-v6
     ObjC.import('Foundation');
 
     function readInput() {
@@ -400,6 +400,24 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
       return isFinite(number) ? Math.max(0, Math.min(100, number)) : null;
     }
 
+    function timestampValue(value) {
+      if (value === null || value === undefined || value === '') return null;
+      var numeric = Number(value);
+      if (isFinite(numeric)) return numeric > 10000000000 ? numeric / 1000 : numeric;
+      var parsed = Date.parse(String(value));
+      return isFinite(parsed) ? parsed / 1000 : null;
+    }
+
+    function resetValue(window) {
+      window = window || {};
+      return timestampValue(
+        window.resets_at != null ? window.resets_at
+          : window.reset_at != null ? window.reset_at
+          : window.resetsAt != null ? window.resetsAt
+          : window.resetAt
+      );
+    }
+
     function contextValue(payload) {
       var window = payload.context_window || {};
       var direct = numberValue(window.used_percentage);
@@ -408,7 +426,8 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
       var size = Number(window.context_window_size);
       var input = Number(usage.input_tokens || 0)
         + Number(usage.cache_creation_input_tokens || 0)
-        + Number(usage.cache_read_input_tokens || 0);
+        + Number(usage.cache_read_input_tokens || 0)
+        + Number(usage.output_tokens || 0);
       return size > 0 ? numberValue(input / size * 100) : null;
     }
 
@@ -473,6 +492,8 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
         writeJSON(stateDirectory + '/claude-usage.json', {
           fiveHourUsed: numberValue(five.used_percentage != null ? five.used_percentage : five.utilization),
           weeklyUsed: numberValue(weekly.used_percentage != null ? weekly.used_percentage : weekly.utilization),
+          fiveHourResetsAt: resetValue(five),
+          weeklyResetsAt: resetValue(weekly),
           contextUsed: contextValue(payload),
           updatedAt: now
         });

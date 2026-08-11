@@ -11,21 +11,25 @@
 
 namespace {
 
-constexpr std::uint32_t kBatteryRefreshMs = 30000;
+constexpr std::uint32_t kPowerRefreshMs = 5000;
 
 companion::app::CompanionState appState;
 companion::communication::BlePeripheral blePeripheral;
 companion::renderer::DisplayRenderer displayRenderer;
 bool lastConnectionState = false;
-std::uint32_t lastBatteryRefreshMs = 0;
+std::uint32_t lastPowerRefreshMs = 0;
 
-void refreshBattery() {
+void refreshPower(const std::uint32_t nowMs) {
   const auto level = M5.Power.getBatteryLevel();
   if (level >= 0) {
     appState.setBatteryLevel(
         static_cast<std::uint8_t>(std::min<std::int32_t>(100, level)));
   }
-  lastBatteryRefreshMs = millis();
+  const bool externalPowerConnected = M5.Power.getVBUSVoltage() > 1000;
+  const bool batteryCharging =
+      M5.Power.isCharging() == m5::Power_Class::is_charging;
+  appState.setPowerState(externalPowerConnected, batteryCharging, nowMs);
+  lastPowerRefreshMs = nowMs;
 }
 
 }  // namespace
@@ -33,7 +37,7 @@ void refreshBattery() {
 void setup() {
   Serial.begin(115200);
   displayRenderer.begin();
-  refreshBattery();
+  refreshPower(millis());
   displayRenderer.render(appState);
 
   if (!blePeripheral.begin()) {
@@ -60,8 +64,8 @@ void loop() {
     appState.setAgentStatus(status, nowMs);
   }
 
-  if (millis() - lastBatteryRefreshMs >= kBatteryRefreshMs) {
-    refreshBattery();
+  if (nowMs - lastPowerRefreshMs >= kPowerRefreshMs) {
+    refreshPower(nowMs);
   }
 
   appState.update(nowMs);

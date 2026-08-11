@@ -13,8 +13,10 @@ enum AgentStatusMessageEncoder {
 
     static func encode(
         _ snapshot: AgentSnapshot,
-        screenTimeout: DisplaySleepTimeout = .never,
-        activityAt: Date? = nil
+        screenTimeoutOnBattery: DisplaySleepTimeout = .never,
+        screenTimeoutOnExternalPower: DisplaySleepTimeout = .never,
+        activityAt: Date? = nil,
+        now: Date = .now
     ) throws -> Data {
         let title = DisplayTitle.sanitize(snapshot.title)
         let titleBytes = Array(title.utf8)
@@ -50,7 +52,8 @@ enum AgentStatusMessageEncoder {
         bytes.append(UInt8(effortBytes.count))
         bytes.append(contentsOf: modelBytes)
         bytes.append(contentsOf: effortBytes)
-        bytes.append(screenTimeout.rawValue)
+        bytes.append(screenTimeoutOnBattery.rawValue)
+        bytes.append(screenTimeoutOnExternalPower.rawValue)
 
         let timestamp = activityAt ?? snapshot.updatedAt
         let milliseconds = timestamp.map {
@@ -61,6 +64,19 @@ enum AgentStatusMessageEncoder {
         bytes.append(UInt8((activityToken >> 16) & 0xFF))
         bytes.append(UInt8((activityToken >> 8) & 0xFF))
         bytes.append(UInt8(activityToken & 0xFF))
+        append(
+            UsageResetCountdown.minutes(until: snapshot.fiveHourResetsAt, now: now),
+            to: &bytes
+        )
+        append(
+            UsageResetCountdown.minutes(until: snapshot.weeklyResetsAt, now: now),
+            to: &bytes
+        )
         return Data(bytes)
+    }
+
+    private static func append(_ value: UInt16, to bytes: inout [UInt8]) {
+        bytes.append(UInt8((value >> 8) & 0xFF))
+        bytes.append(UInt8(value & 0xFF))
     }
 }

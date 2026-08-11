@@ -3,14 +3,17 @@ import Foundation
 protocol AgentPreferenceStoring: AnyObject {
     var selectedSource: AgentSource { get set }
     var defaultTool: DefaultAgentTool { get set }
-    var displaySleepTimeout: DisplaySleepTimeout { get set }
+    var displaySleepTimeoutOnBattery: DisplaySleepTimeout { get set }
+    var displaySleepTimeoutOnExternalPower: DisplaySleepTimeout { get set }
 }
 
 final class UserDefaultsAgentPreferenceStore: AgentPreferenceStoring {
     private let defaults: UserDefaults
     private let selectedSourceKey = "selectedAgentSource"
     private let defaultToolKey = "defaultAgentTool"
-    private let displaySleepTimeoutKey = "displaySleepTimeoutMinutes"
+    private let legacyDisplaySleepTimeoutKey = "displaySleepTimeoutMinutes"
+    private let batteryDisplaySleepTimeoutKey = "displaySleepTimeoutOnBatteryMinutes"
+    private let externalPowerDisplaySleepTimeoutKey = "displaySleepTimeoutOnExternalPowerMinutes"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -34,16 +37,33 @@ final class UserDefaultsAgentPreferenceStore: AgentPreferenceStoring {
         }
     }
 
-    var displaySleepTimeout: DisplaySleepTimeout {
+    var displaySleepTimeoutOnBattery: DisplaySleepTimeout {
         get {
-            guard defaults.object(forKey: displaySleepTimeoutKey) != nil else {
+            if defaults.object(forKey: batteryDisplaySleepTimeoutKey) != nil {
+                let value = UInt8(clamping: defaults.integer(forKey: batteryDisplaySleepTimeoutKey))
+                return DisplaySleepTimeout(rawValue: value) ?? .never
+            }
+            guard defaults.object(forKey: legacyDisplaySleepTimeoutKey) != nil else {
                 return .never
             }
-            let value = UInt8(clamping: defaults.integer(forKey: displaySleepTimeoutKey))
+            let value = UInt8(clamping: defaults.integer(forKey: legacyDisplaySleepTimeoutKey))
             return DisplaySleepTimeout(rawValue: value) ?? .never
         }
         set {
-            defaults.set(Int(newValue.rawValue), forKey: displaySleepTimeoutKey)
+            defaults.set(Int(newValue.rawValue), forKey: batteryDisplaySleepTimeoutKey)
+        }
+    }
+
+    var displaySleepTimeoutOnExternalPower: DisplaySleepTimeout {
+        get {
+            guard defaults.object(forKey: externalPowerDisplaySleepTimeoutKey) != nil else {
+                return .never
+            }
+            let value = UInt8(clamping: defaults.integer(forKey: externalPowerDisplaySleepTimeoutKey))
+            return DisplaySleepTimeout(rawValue: value) ?? .never
+        }
+        set {
+            defaults.set(Int(newValue.rawValue), forKey: externalPowerDisplaySleepTimeoutKey)
         }
     }
 }

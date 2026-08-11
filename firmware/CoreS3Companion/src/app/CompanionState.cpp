@@ -16,7 +16,10 @@ void CompanionState::setAgentStatus(const protocol::AgentStatusMessage& status,
     return;
   }
   if (!hasStatus_ || status.activityToken != status_.activityToken ||
-      status.displayTimeoutMinutes != status_.displayTimeoutMinutes) {
+      status.displayTimeoutOnBatteryMinutes !=
+          status_.displayTimeoutOnBatteryMinutes ||
+      status.displayTimeoutOnExternalPowerMinutes !=
+          status_.displayTimeoutOnExternalPowerMinutes) {
     recordLocalActivity(nowMs);
   }
   status_ = status;
@@ -34,13 +37,25 @@ void CompanionState::setBatteryLevel(const std::uint8_t batteryLevel) {
                                      : protocol::kUnknownMetricValue;
 }
 
+void CompanionState::setPowerState(const bool externalPowerConnected,
+                                   const bool batteryCharging,
+                                   const std::uint32_t nowMs) {
+  if (externalPowerConnected_ != externalPowerConnected) {
+    recordLocalActivity(nowMs);
+  }
+  externalPowerConnected_ = externalPowerConnected;
+  batteryCharging_ = batteryCharging;
+}
+
 void CompanionState::update(const std::uint32_t nowMs) {
   if (hasStatus_ && nowMs - lastSampleMs_ >= kSampleTimeoutMs) {
     hasStatus_ = false;
   }
 
-  const std::uint8_t timeoutMinutes = status_.displayTimeoutMinutes;
-  if (timeoutMinutes == 0) {
+  const std::uint8_t timeoutMinutes = externalPowerConnected_
+                                          ? status_.displayTimeoutOnExternalPowerMinutes
+                                          : status_.displayTimeoutOnBatteryMinutes;
+  if (timeoutMinutes == 0 || hasActiveSession()) {
     displayAwake_ = true;
     return;
   }
@@ -58,6 +73,15 @@ bool CompanionState::hasFreshStatus() const {
   return connected_ && hasStatus_;
 }
 
+bool CompanionState::hasActiveSession() const {
+  if (!hasFreshStatus()) {
+    return false;
+  }
+  return status_.state == protocol::AgentRunState::kRunning ||
+         status_.state == protocol::AgentRunState::kWaitingAuthorization ||
+         status_.state == protocol::AgentRunState::kWaitingReply;
+}
+
 bool CompanionState::isDisplayAwake() const { return displayAwake_; }
 
 const protocol::AgentStatusMessage& CompanionState::status() const {
@@ -65,6 +89,12 @@ const protocol::AgentStatusMessage& CompanionState::status() const {
 }
 
 std::uint8_t CompanionState::batteryLevel() const { return batteryLevel_; }
+
+bool CompanionState::isExternalPowerConnected() const {
+  return externalPowerConnected_;
+}
+
+bool CompanionState::isBatteryCharging() const { return batteryCharging_; }
 
 }  // namespace app
 }  // namespace companion

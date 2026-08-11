@@ -98,8 +98,11 @@ AgentParseResult parseAgentStatus(const std::uint8_t* data,
   std::size_t effortLength = 0;
   const std::uint8_t* modelData = nullptr;
   const std::uint8_t* effortData = nullptr;
-  std::uint8_t displayTimeoutMinutes = 0;
+  std::uint8_t displayTimeoutOnBatteryMinutes = 0;
+  std::uint8_t displayTimeoutOnExternalPowerMinutes = 0;
   std::uint32_t activityToken = 0;
+  std::uint16_t fiveHourResetMinutes = kUnknownResetMinutes;
+  std::uint16_t weeklyResetMinutes = kUnknownResetMinutes;
   if (length != legacyLength) {
     if (length < legacyLength + 2) {
       return AgentParseResult::kInvalidLength;
@@ -111,6 +114,7 @@ AgentParseResult parseAgentStatus(const std::uint8_t* data,
     if (modelLength > kMaximumModelNameLength ||
         effortLength > kMaximumEffortLength ||
         (length != metadataLength &&
+         length != metadataLength + kLegacyDisplaySettingsLength &&
          length != metadataLength + kDisplaySettingsLength)) {
       return AgentParseResult::kInvalidLength;
     }
@@ -121,9 +125,10 @@ AgentParseResult parseAgentStatus(const std::uint8_t* data,
       return AgentParseResult::kInvalidMetadata;
     }
 
-    if (length == metadataLength + kDisplaySettingsLength) {
-      displayTimeoutMinutes = data[metadataLength];
-      if (displayTimeoutMinutes > kMaximumDisplayTimeoutMinutes) {
+    if (length == metadataLength + kLegacyDisplaySettingsLength) {
+      displayTimeoutOnBatteryMinutes = data[metadataLength];
+      displayTimeoutOnExternalPowerMinutes = data[metadataLength];
+      if (displayTimeoutOnBatteryMinutes > kMaximumDisplayTimeoutMinutes) {
         return AgentParseResult::kInvalidDisplayTimeout;
       }
       activityToken =
@@ -131,6 +136,25 @@ AgentParseResult parseAgentStatus(const std::uint8_t* data,
           (static_cast<std::uint32_t>(data[metadataLength + 2]) << 16) |
           (static_cast<std::uint32_t>(data[metadataLength + 3]) << 8) |
           static_cast<std::uint32_t>(data[metadataLength + 4]);
+    } else if (length == metadataLength + kDisplaySettingsLength) {
+      displayTimeoutOnBatteryMinutes = data[metadataLength];
+      displayTimeoutOnExternalPowerMinutes = data[metadataLength + 1];
+      if (displayTimeoutOnBatteryMinutes > kMaximumDisplayTimeoutMinutes ||
+          displayTimeoutOnExternalPowerMinutes >
+              kMaximumDisplayTimeoutMinutes) {
+        return AgentParseResult::kInvalidDisplayTimeout;
+      }
+      activityToken =
+          (static_cast<std::uint32_t>(data[metadataLength + 2]) << 24) |
+          (static_cast<std::uint32_t>(data[metadataLength + 3]) << 16) |
+          (static_cast<std::uint32_t>(data[metadataLength + 4]) << 8) |
+          static_cast<std::uint32_t>(data[metadataLength + 5]);
+      fiveHourResetMinutes =
+          (static_cast<std::uint16_t>(data[metadataLength + 6]) << 8) |
+          static_cast<std::uint16_t>(data[metadataLength + 7]);
+      weeklyResetMinutes =
+          (static_cast<std::uint16_t>(data[metadataLength + 8]) << 8) |
+          static_cast<std::uint16_t>(data[metadataLength + 9]);
     }
   }
 
@@ -151,8 +175,12 @@ AgentParseResult parseAgentStatus(const std::uint8_t* data,
   if (effortLength > 0) {
     std::memcpy(message.effort, effortData, effortLength);
   }
-  message.displayTimeoutMinutes = displayTimeoutMinutes;
+  message.displayTimeoutOnBatteryMinutes = displayTimeoutOnBatteryMinutes;
+  message.displayTimeoutOnExternalPowerMinutes =
+      displayTimeoutOnExternalPowerMinutes;
   message.activityToken = activityToken;
+  message.fiveHourResetMinutes = fiveHourResetMinutes;
+  message.weeklyResetMinutes = weeklyResetMinutes;
   return AgentParseResult::kOk;
 }
 

@@ -17,12 +17,15 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
     private let stateDirectoryURL: URL
     private let codexSessionsURL: URL
     private let claudeSessionsURL: URL
+    private let claudeProjectsURL: URL
+    private let claudeConfigurationURL: URL
     private let codexSessionIndexURL: URL
     private let fileManager: FileManager
     private var timer: Timer?
     private var codexRolloutCache: [URL: CodexRolloutReader.CacheEntry] = [:]
     private var cachedCodexRollouts: [CodexRolloutReader.Snapshot] = []
     private var lastCodexScanAt = Date.distantPast
+    private var claudeTranscriptCache: [URL: ClaudeTranscriptCacheEntry] = [:]
 
     init(
         stateDirectoryURL: URL = AgentStatusMonitor.defaultStateDirectoryURL,
@@ -30,6 +33,10 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
             .appendingPathComponent(".codex/sessions", isDirectory: true),
         claudeSessionsURL: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/sessions", isDirectory: true),
+        claudeProjectsURL: URL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/projects", isDirectory: true),
+        claudeConfigurationURL: URL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude.json"),
         codexSessionIndexURL: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/session_index.jsonl"),
         fileManager: FileManager = .default
@@ -37,6 +44,8 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
         self.stateDirectoryURL = stateDirectoryURL
         self.codexSessionsURL = codexSessionsURL
         self.claudeSessionsURL = claudeSessionsURL
+        self.claudeProjectsURL = claudeProjectsURL
+        self.claudeConfigurationURL = claudeConfigurationURL
         self.codexSessionIndexURL = codexSessionIndexURL
         self.fileManager = fileManager
     }
@@ -67,10 +76,15 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
 
     func refresh() {
         let claudeUsage = loadClaudeUsage()
+        let claudeRecords = loadHookRecords(for: .claude)
+        let claudeTranscriptUsage = loadClaudeTranscriptUsage(
+            for: Set(claudeRecords.map(\.sessionID))
+        )
         let claudeSnapshots = snapshots(
-            from: loadHookRecords(for: .claude),
+            from: claudeRecords,
             fallbackUsage: claudeUsage,
-            sessionTitles: loadClaudeSessionTitles()
+            sessionTitles: loadClaudeSessionTitles(),
+            transcriptUsage: claudeTranscriptUsage
         )
 
         let codexHooks = loadHookRecords(for: .codex)
@@ -120,21 +134,26 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
     private func snapshots(
         from records: [StatusRecord],
         fallbackUsage: AgentUsage?,
-        sessionTitles: [String: String]
+        sessionTitles: [String: String],
+        transcriptUsage: [String: ClaudeTranscriptUsage]
     ) -> [AgentSnapshot] {
         records.map { record in
-            AgentSnapshot(
+            let transcript = transcriptUsage[record.sessionID]
+            return AgentSnapshot(
                 sessionID: record.sessionID,
                 source: record.source,
                 state: record.state,
                 title: nonEmpty(sessionTitles[record.sessionID])
+                    ?? nonEmpty(transcript?.aiTitle)
                     ?? nonEmpty(record.title)
                     ?? "NO ACTIVE SESSION",
-                modelName: nonEmpty(record.modelName),
+                modelName: nonEmpty(record.modelName) ?? nonEmpty(transcript?.modelName),
                 effort: nonEmpty(record.effort),
                 fiveHourRemaining: fallbackUsage?.fiveHourRemaining,
                 weeklyRemaining: fallbackUsage?.weeklyRemaining,
-                contextUsed: record.contextUsed ?? fallbackUsage?.contextUsed,
+                contextUsed: record.contextUsed ?? transcript?.contextUsed ?? fallbackUsage?.contextUsed,
+                fiveHourResetsAt: fallbackUsage?.fiveHourResetsAt,
+                weeklyResetsAt: fallbackUsage?.weeklyResetsAt,
                 updatedAt: record.updatedAt ?? fallbackUsage?.updatedAt
             )
         }
@@ -172,6 +191,8 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
                 fiveHourRemaining: usage?.fiveHourRemaining,
                 weeklyRemaining: usage?.weeklyRemaining,
                 contextUsed: rollout?.usage?.contextUsed ?? hook.contextUsed,
+                fiveHourResetsAt: usage?.fiveHourResetsAt,
+                weeklyResetsAt: usage?.weeklyResetsAt,
                 updatedAt: stateRecord.updatedAt
             ))
         }
@@ -190,6 +211,8 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
                 fiveHourRemaining: usage?.fiveHourRemaining,
                 weeklyRemaining: usage?.weeklyRemaining,
                 contextUsed: rollout.usage?.contextUsed,
+                fiveHourResetsAt: usage?.fiveHourResetsAt,
+                weeklyResetsAt: usage?.weeklyResetsAt,
                 updatedAt: rollout.record.updatedAt
             ))
         }
@@ -209,6 +232,7 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
         for url in urls where url.pathExtension == "json" {
             guard let data = try? Data(contentsOf: url),
                   let metadata = try? JSONDecoder().decode(ClaudeSessionMetadata.self, from: data),
+                  metadata.nameSource?.caseInsensitiveCompare("derived") != .orderedSame,
                   let title = nonEmpty(metadata.name) else {
                 continue
             }
@@ -276,6 +300,36 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
     }
 
     private func loadClaudeUsage() -> AgentUsage? {
+        let sources = [loadClaudeStatusLineUsage(), loadClaudeCachedUsage()]
+            .compactMap { $0 }
+            .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
+        guard !sources.isEmpty else { return nil }
+
+        func newestValue(_ value: (AgentUsage) -> UInt8?) -> UInt8? {
+            for source in sources {
+                if let result = value(source) { return result }
+            }
+            return nil
+        }
+
+        func newestDate(_ value: (AgentUsage) -> Date?) -> Date? {
+            for source in sources {
+                if let result = value(source) { return result }
+            }
+            return nil
+        }
+
+        return AgentUsage(
+            fiveHourRemaining: newestValue(\.fiveHourRemaining),
+            weeklyRemaining: newestValue(\.weeklyRemaining),
+            contextUsed: newestValue(\.contextUsed),
+            fiveHourResetsAt: newestDate(\.fiveHourResetsAt),
+            weeklyResetsAt: newestDate(\.weeklyResetsAt),
+            updatedAt: sources.compactMap(\.updatedAt).max()
+        )
+    }
+
+    private func loadClaudeStatusLineUsage() -> AgentUsage? {
         let url = stateDirectoryURL.appendingPathComponent("claude-usage.json")
         guard let data = try? Data(contentsOf: url),
               let payload = try? JSONDecoder().decode(ClaudeUsagePayload.self, from: data) else {
@@ -285,8 +339,69 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
             fiveHourRemaining: remaining(fromUsed: payload.fiveHourUsed),
             weeklyRemaining: remaining(fromUsed: payload.weeklyUsed),
             contextUsed: percentage(payload.contextUsed),
+            fiveHourResetsAt: payload.fiveHourResetsAt.map(Date.init(timeIntervalSince1970:)),
+            weeklyResetsAt: payload.weeklyResetsAt.map(Date.init(timeIntervalSince1970:)),
             updatedAt: payload.updatedAt.map(Date.init(timeIntervalSince1970:))
         )
+    }
+
+    private func loadClaudeCachedUsage() -> AgentUsage? {
+        guard let data = try? Data(contentsOf: claudeConfigurationURL),
+              let payload = try? JSONDecoder().decode(ClaudeConfigurationPayload.self, from: data),
+              let cache = payload.cachedUsageUtilization else {
+            return nil
+        }
+        return AgentUsage(
+            fiveHourRemaining: remaining(fromUsed: cache.utilization?.fiveHour?.utilization),
+            weeklyRemaining: remaining(fromUsed: cache.utilization?.sevenDay?.utilization),
+            contextUsed: nil,
+            fiveHourResetsAt: cache.utilization?.fiveHour?.resetsAt,
+            weeklyResetsAt: cache.utilization?.sevenDay?.resetsAt,
+            updatedAt: cache.fetchedAtMs.map { Date(timeIntervalSince1970: $0 / 1_000) }
+        )
+    }
+
+    private func loadClaudeTranscriptUsage(
+        for sessionIDs: Set<String>
+    ) -> [String: ClaudeTranscriptUsage] {
+        guard !sessionIDs.isEmpty,
+              let enumerator = fileManager.enumerator(
+                  at: claudeProjectsURL,
+                  includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+                  options: [.skipsHiddenFiles, .skipsPackageDescendants]
+              ) else {
+            return [:]
+        }
+
+        var result: [String: ClaudeTranscriptUsage] = [:]
+        for case let url as URL in enumerator where url.pathExtension == "jsonl" {
+            let sessionID = url.deletingPathExtension().lastPathComponent
+            guard sessionIDs.contains(sessionID),
+                  let values = try? url.resourceValues(
+                      forKeys: [.contentModificationDateKey, .fileSizeKey]
+                  ) else {
+                continue
+            }
+            let modifiedAt = values.contentModificationDate ?? .distantPast
+            let fileSize = values.fileSize ?? 0
+            let entry: ClaudeTranscriptCacheEntry
+            if let cached = claudeTranscriptCache[url],
+               cached.modifiedAt == modifiedAt,
+               cached.fileSize == fileSize {
+                entry = cached
+            } else {
+                entry = ClaudeTranscriptCacheEntry(
+                    modifiedAt: modifiedAt,
+                    fileSize: fileSize,
+                    usage: ClaudeTranscriptReader.read(from: url)
+                )
+                claudeTranscriptCache[url] = entry
+            }
+            if let usage = entry.usage {
+                result[sessionID] = usage
+            }
+        }
+        return result
     }
 
     private func loadCodexRollouts() -> [CodexRolloutReader.Snapshot] {
@@ -377,16 +492,82 @@ private struct ClaudeUsagePayload: Decodable {
     var fiveHourUsed: Double?
     var weeklyUsed: Double?
     var contextUsed: Double?
+    var fiveHourResetsAt: Double?
+    var weeklyResetsAt: Double?
     var updatedAt: Double?
+}
+
+private struct ClaudeConfigurationPayload: Decodable {
+    var cachedUsageUtilization: ClaudeCachedUsage?
+}
+
+private struct ClaudeCachedUsage: Decodable {
+    var fetchedAtMs: Double?
+    var utilization: ClaudeCachedUtilization?
+}
+
+private struct ClaudeCachedUtilization: Decodable {
+    var fiveHour: ClaudeCachedWindow?
+    var sevenDay: ClaudeCachedWindow?
+
+    private enum CodingKeys: String, CodingKey {
+        case fiveHour = "five_hour"
+        case sevenDay = "seven_day"
+    }
+}
+
+private struct ClaudeCachedWindow: Decodable {
+    var utilization: Double?
+    var resetsAt: Date?
+
+    private enum CodingKeys: String, CodingKey {
+        case utilization
+        case resetsAt = "resets_at"
+        case resetAt = "reset_at"
+        case camelResetsAt = "resetsAt"
+        case camelResetAt = "resetAt"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        utilization = try container.decodeIfPresent(Double.self, forKey: .utilization)
+        resetsAt = Self.decodeDate(from: container, keys: [
+            .resetsAt, .resetAt, .camelResetsAt, .camelResetAt,
+        ])
+    }
+
+    private static func decodeDate(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        keys: [CodingKeys]
+    ) -> Date? {
+        for key in keys {
+            if let value = try? container.decode(Double.self, forKey: key) {
+                return Date(timeIntervalSince1970: value > 10_000_000_000 ? value / 1_000 : value)
+            }
+            if let value = try? container.decode(String.self, forKey: key) {
+                if let numeric = Double(value) {
+                    return Date(timeIntervalSince1970: numeric > 10_000_000_000 ? numeric / 1_000 : numeric)
+                }
+                let fractional = ISO8601DateFormatter()
+                fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                if let date = fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value) {
+                    return date
+                }
+            }
+        }
+        return nil
+    }
 }
 
 private struct ClaudeSessionMetadata: Decodable {
     var sessionID: String
     var name: String?
+    var nameSource: String?
 
     private enum CodingKeys: String, CodingKey {
         case sessionID = "sessionId"
         case name
+        case nameSource
     }
 }
 
@@ -415,7 +596,111 @@ private struct AgentUsage {
     var fiveHourRemaining: UInt8?
     var weeklyRemaining: UInt8?
     var contextUsed: UInt8?
+    var fiveHourResetsAt: Date? = nil
+    var weeklyResetsAt: Date? = nil
     var updatedAt: Date?
+}
+
+struct ClaudeTranscriptUsage {
+    var aiTitle: String?
+    var modelName: String?
+    var contextUsed: UInt8?
+}
+
+private struct ClaudeTranscriptCacheEntry {
+    var modifiedAt: Date
+    var fileSize: Int
+    var usage: ClaudeTranscriptUsage?
+}
+
+enum ClaudeTranscriptReader {
+    static func read(from url: URL) -> ClaudeTranscriptUsage? {
+        guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
+            return nil
+        }
+
+        var aiTitle: String?
+        var modelName: String?
+        var contextUsed: UInt8?
+        contents.enumerateLines { line, _ in
+            guard let data = line.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return
+            }
+
+            if object["type"] as? String == "ai-title",
+               let value = object["aiTitle"] as? String {
+                let title = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !title.isEmpty {
+                    aiTitle = title
+                }
+                return
+            }
+
+            guard object["type"] as? String == "assistant",
+                  let message = object["message"] as? [String: Any],
+                  let usage = message["usage"] as? [String: Any] else {
+                return
+            }
+
+            let contextTokens = number(usage["input_tokens"])
+                + number(usage["cache_creation_input_tokens"])
+                + number(usage["cache_read_input_tokens"])
+                + number(usage["output_tokens"])
+            guard contextTokens > 0 else { return }
+            modelName = message["model"] as? String
+            contextUsed = ClaudeModelContextWindow.tokens(for: modelName).map {
+                UInt8(max(0, min(100, (contextTokens / $0 * 100).rounded())))
+            }
+        }
+        guard aiTitle != nil || modelName != nil || contextUsed != nil else { return nil }
+        return ClaudeTranscriptUsage(
+            aiTitle: aiTitle,
+            modelName: modelName,
+            contextUsed: contextUsed
+        )
+    }
+
+    private static func number(_ value: Any?) -> Double {
+        (value as? NSNumber)?.doubleValue ?? 0
+    }
+}
+
+enum ClaudeModelContextWindow {
+    private static let oneMillionPrefixes = [
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-fable-5",
+        "claude-mythos-5",
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+    ]
+
+    private static let twoHundredThousandPrefixes = [
+        "claude-opus-4",
+        "claude-sonnet-4",
+        "claude-haiku-4",
+        "claude-3",
+        "claude-2",
+        "claude-instant",
+    ]
+
+    static func tokens(for modelName: String?) -> Double? {
+        guard let modelName else { return nil }
+        let normalized = modelName
+            .lowercased()
+            .replacingOccurrences(of: ".", with: "-")
+            .replacingOccurrences(of: "_", with: "-")
+        if oneMillionPrefixes.contains(where: normalized.hasPrefix) {
+            return 1_000_000
+        }
+        if twoHundredThousandPrefixes.contains(where: normalized.hasPrefix) {
+            return 200_000
+        }
+        return nil
+    }
 }
 
 private extension AgentRunState {
@@ -595,15 +880,20 @@ private enum CodexRolloutReader {
 
         var fiveHourRemaining = previous?.fiveHourRemaining
         var weeklyRemaining = previous?.weeklyRemaining
+        var fiveHourResetsAt = previous?.fiveHourResetsAt
+        var weeklyResetsAt = previous?.weeklyResetsAt
         for key in ["primary", "secondary"] {
             guard let window = rateLimits?[key] as? [String: Any],
                   let used = number(window["used_percent"]),
                   let minutes = number(window["window_minutes"]) else { continue }
             let remaining = UInt8(max(0, min(100, (100 - used).rounded())))
+            let resetsAt = resetDate(from: window, relativeTo: timestamp)
             if minutes >= 240, minutes <= 360 {
                 fiveHourRemaining = remaining
+                fiveHourResetsAt = resetsAt ?? fiveHourResetsAt
             } else if minutes >= 1_440 {
                 weeklyRemaining = remaining
+                weeklyResetsAt = resetsAt ?? weeklyResetsAt
             }
         }
 
@@ -627,8 +917,31 @@ private enum CodexRolloutReader {
             fiveHourRemaining: fiveHourRemaining,
             weeklyRemaining: weeklyRemaining,
             contextUsed: context,
+            fiveHourResetsAt: fiveHourResetsAt,
+            weeklyResetsAt: weeklyResetsAt,
             updatedAt: timestamp ?? previous?.updatedAt
         )
+    }
+
+    private static func resetDate(
+        from window: [String: Any],
+        relativeTo timestamp: Date?
+    ) -> Date? {
+        for key in ["resets_at", "reset_at", "resetsAt", "resetAt"] {
+            if let value = number(window[key]) {
+                return Date(timeIntervalSince1970: value > 10_000_000_000 ? value / 1_000 : value)
+            }
+            if let value = window[key] as? String,
+               let date = date(from: value) {
+                return date
+            }
+        }
+        for key in ["resets_in_seconds", "reset_after_seconds"] {
+            if let seconds = number(window[key]) {
+                return (timestamp ?? .now).addingTimeInterval(seconds)
+            }
+        }
+        return nil
     }
 
     private static func sum(_ first: Double?, _ second: Double?) -> Double? {

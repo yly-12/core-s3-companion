@@ -22,6 +22,7 @@
 		A0000000000000000000000D /* AgentPreferenceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000011 /* AgentPreferenceStore.swift */; };
 		A0000000000000000000000E /* AgentStatusMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000012 /* AgentStatusMonitor.swift */; };
 		A0000000000000000000000F /* AgentIntegrationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* AgentIntegrationManager.swift */; };
+		A00000000000000000000010 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000015 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -55,6 +56,7 @@
 		B00000000000000000000012 /* AgentStatusMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStatusMonitor.swift; sourceTree = "<group>"; };
 		B00000000000000000000013 /* AgentIntegrationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentIntegrationManager.swift; sourceTree = "<group>"; };
 		B00000000000000000000014 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Version.xcconfig; path = ../../Version.xcconfig; sourceTree = "<group>"; };
+		B00000000000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -95,6 +97,7 @@
 		C00000000000000000000011 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				B00000000000000000000015 /* Assets.xcassets */,
 				B00000000000000000000001 /* CoreS3CompanionApp.swift */,
 				B0000000000000000000000B /* Info.plist */,
 				B0000000000000000000000C /* CoreS3Companion.entitlements */,
@@ -256,6 +259,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A00000000000000000000010 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -348,6 +352,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = B00000000000000000000014 /* Version.xcconfig */;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/CoreS3Companion.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -368,6 +373,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = B00000000000000000000014 /* Version.xcconfig */;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/CoreS3Companion.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;

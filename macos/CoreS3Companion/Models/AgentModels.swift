@@ -69,7 +69,7 @@ enum AgentRunState: UInt8, Codable, CaseIterable {
     var shortLabel: String {
         switch self {
         case .idle: "IDLE"
-        case .running: "RUN"
+        case .running: "RUNNING"
         case .waitingAuthorization: "AUTH"
         case .waitingReply: "REPLY"
         case .completed: "DONE"
@@ -95,6 +95,10 @@ enum AgentRunState: UInt8, Codable, CaseIterable {
         case .completed: "checkmark.circle.fill"
         }
     }
+
+    var requiresUserAttention: Bool {
+        self == .waitingAuthorization || self == .waitingReply
+    }
 }
 
 struct AgentSnapshot: Equatable {
@@ -107,6 +111,8 @@ struct AgentSnapshot: Equatable {
     var fiveHourRemaining: UInt8?
     var weeklyRemaining: UInt8?
     var contextUsed: UInt8?
+    var fiveHourResetsAt: Date? = nil
+    var weeklyResetsAt: Date? = nil
     var updatedAt: Date?
 
     static let idle = AgentSnapshot(
@@ -119,8 +125,36 @@ struct AgentSnapshot: Equatable {
         fiveHourRemaining: nil,
         weeklyRemaining: nil,
         contextUsed: nil,
+        fiveHourResetsAt: nil,
+        weeklyResetsAt: nil,
         updatedAt: nil
     )
+}
+
+enum UsageResetCountdown {
+    static let unknownMinutes = UInt16.max
+
+    static func minutes(until resetAt: Date?, now: Date = .now) -> UInt16 {
+        guard let resetAt else { return unknownMinutes }
+        let remainingSeconds = max(0, resetAt.timeIntervalSince(now))
+        return UInt16(clamping: Int(ceil(remainingSeconds / 60)))
+    }
+
+    static func display(minutes: UInt16, weekly: Bool) -> String? {
+        guard minutes != unknownMinutes else { return nil }
+        if weekly, minutes >= 24 * 60 {
+            let days = minutes / (24 * 60)
+            let hours = (minutes % (24 * 60)) / 60
+            return "\(days)D\(hours)H"
+        }
+        let hours = minutes / 60
+        let remainingMinutes = minutes % 60
+        return "\(hours)H\(remainingMinutes)m"
+    }
+
+    static func display(until resetAt: Date?, weekly: Bool, now: Date = .now) -> String? {
+        display(minutes: minutes(until: resetAt, now: now), weekly: weekly)
+    }
 }
 
 enum DisplayMetadata {

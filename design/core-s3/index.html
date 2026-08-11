@@ -22,11 +22,11 @@
 <body>
   <main>
     <h1>CoreS3 / Claude Status UI</h1>
-    <p class="intro">所有设备画面均为原生 <code>320 × 240</code> SVG。最小字号约为 <code>11px</code>，并以 <code>5H / WK / CTX / BAT / EFF</code> 缩写压缩信息；底栏显示当前模型与 effort。V1 不包含触摸控件。</p>
+    <p class="intro">所有设备画面均为原生 <code>320 × 240</code> SVG。状态区只保留一个主词；Usage 依次显示百分比、进度条和重置倒计时，5H 使用 <code>xHym</code>，Weekly 使用 <code>xDyH</code> 并在不足 24 小时时切换为 <code>xHym</code>，各数字不补前导 0。Context 标记为 <code>SESSION</code>，充电时电量文字变为绿色。V1 不包含触摸控件。</p>
     <section class="grid">
-      <article><h2>01 / Minimal Status</h2><p>推荐主方向 · RUN</p><object data="01-minimal-status.svg" type="image/svg+xml"></object></article>
-      <article><h2>02 / Telemetry Status</h2><p>较高信息密度 · RUN</p><object data="02-telemetry-status.svg" type="image/svg+xml"></object></article>
-      <article><h2>03 / Pixel Terminal</h2><p>复古终端方向 · RUN</p><object data="03-pixel-terminal-status.svg" type="image/svg+xml"></object></article>
+      <article><h2>01 / Minimal Status</h2><p>推荐主方向 · RUNNING</p><object data="01-minimal-status.svg" type="image/svg+xml"></object></article>
+      <article><h2>02 / Telemetry Status</h2><p>较高信息密度 · RUNNING</p><object data="02-telemetry-status.svg" type="image/svg+xml"></object></article>
+      <article><h2>03 / Pixel Terminal</h2><p>复古终端方向 · RUNNING</p><object data="03-pixel-terminal-status.svg" type="image/svg+xml"></object></article>
       <article><h2>04 / Idle</h2><p>空闲，等待新任务</p><object data="04-state-idle.svg" type="image/svg+xml"></object></article>
       <article><h2>05 / Authorization</h2><p>等待用户授权工具操作</p><object data="05-state-authorization.svg" type="image/svg+xml"></object></article>
       <article><h2>06 / Reply</h2><p>等待用户回复</p><object data="06-state-reply.svg" type="image/svg+xml"></object></article>

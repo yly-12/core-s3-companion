@@ -26,9 +26,15 @@ final class CompanionViewModel: ObservableObject {
             monitor.refresh()
         }
     }
-    @Published var displaySleepTimeout: DisplaySleepTimeout {
+    @Published var displaySleepTimeoutOnBattery: DisplaySleepTimeout {
         didSet {
-            preferenceStore.displaySleepTimeout = displaySleepTimeout
+            preferenceStore.displaySleepTimeoutOnBattery = displaySleepTimeoutOnBattery
+            sendCurrentSnapshot()
+        }
+    }
+    @Published var displaySleepTimeoutOnExternalPower: DisplaySleepTimeout {
+        didSet {
+            preferenceStore.displaySleepTimeoutOnExternalPower = displaySleepTimeoutOnExternalPower
             sendCurrentSnapshot()
         }
     }
@@ -56,7 +62,8 @@ final class CompanionViewModel: ObservableObject {
         self.integrationManager = integrationManager
         selectedAgentSource = preferenceStore.selectedSource
         defaultAgentTool = preferenceStore.defaultTool
-        displaySleepTimeout = preferenceStore.displaySleepTimeout
+        displaySleepTimeoutOnBattery = preferenceStore.displaySleepTimeoutOnBattery
+        displaySleepTimeoutOnExternalPower = preferenceStore.displaySleepTimeoutOnExternalPower
         pairedDeviceID = pairedDeviceStore.deviceID
         pairedDeviceName = pairedDeviceStore.deviceName
 
@@ -163,7 +170,8 @@ final class CompanionViewModel: ObservableObject {
         guard isConnected,
               let packet = try? AgentStatusMessageEncoder.encode(
                   agentSnapshot,
-                  screenTimeout: displaySleepTimeout,
+                  screenTimeoutOnBattery: displaySleepTimeoutOnBattery,
+                  screenTimeoutOnExternalPower: displaySleepTimeoutOnExternalPower,
                   activityAt: agentSnapshots.compactMap(\.updatedAt).max()
               ) else {
             return
@@ -175,7 +183,17 @@ final class CompanionViewModel: ObservableObject {
         let snapshots = snapshots.isEmpty ? [.idle] : snapshots
         let currentID = agentSnapshot.sessionID
         agentSnapshots = snapshots
-        if let index = snapshots.firstIndex(where: { $0.sessionID == currentID }) {
+        let attentionIndexes = snapshots.indices.filter {
+            snapshots[$0].state.requiresUserAttention
+        }
+        if agentSnapshot.state.requiresUserAttention,
+           let index = attentionIndexes.first(where: {
+               snapshots[$0].sessionID == currentID
+           }) {
+            rotationIndex = index
+        } else if let index = attentionIndexes.first {
+            rotationIndex = index
+        } else if let index = snapshots.firstIndex(where: { $0.sessionID == currentID }) {
             rotationIndex = index
         } else {
             rotationIndex = 0
@@ -185,7 +203,8 @@ final class CompanionViewModel: ObservableObject {
     }
 
     func rotateSession() {
-        guard agentSnapshots.count > 1 else { return }
+        guard agentSnapshots.count > 1,
+              !agentSnapshot.state.requiresUserAttention else { return }
         rotationIndex = (rotationIndex + 1) % agentSnapshots.count
         agentSnapshot = agentSnapshots[rotationIndex]
         sendCurrentSnapshot()
