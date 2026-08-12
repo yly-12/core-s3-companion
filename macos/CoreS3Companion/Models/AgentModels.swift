@@ -147,6 +147,9 @@ enum UsageResetCountdown {
             let hours = (minutes % (24 * 60)) / 60
             return "\(days)D\(hours)H"
         }
+        if minutes < 60 {
+            return "\(minutes)m"
+        }
         let hours = minutes / 60
         let remainingMinutes = minutes % 60
         return "\(hours)H\(remainingMinutes)m"

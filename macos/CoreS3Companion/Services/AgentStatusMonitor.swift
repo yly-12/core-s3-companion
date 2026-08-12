@@ -10,6 +10,8 @@ protocol AgentStatusMonitoring: AnyObject {
 }
 
 final class AgentStatusMonitor: AgentStatusMonitoring {
+    private static let claudeUsageRefreshInterval: TimeInterval = 5 * 60
+
     var onSnapshots: (([AgentSnapshot]) -> Void)?
     var selectedSource: AgentSource = .automatic
     var defaultTool: DefaultAgentTool = .claude
@@ -21,11 +23,16 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
     private let claudeConfigurationURL: URL
     private let codexSessionIndexURL: URL
     private let fileManager: FileManager
+    private let claudeUsageRefresher: ClaudeUsageRefreshing?
+    private let currentDate: () -> Date
     private var timer: Timer?
     private var codexRolloutCache: [URL: CodexRolloutReader.CacheEntry] = [:]
     private var cachedCodexRollouts: [CodexRolloutReader.Snapshot] = []
     private var lastCodexScanAt = Date.distantPast
     private var claudeTranscriptCache: [URL: ClaudeTranscriptCacheEntry] = [:]
+    private var lastClaudeUsageRefreshAttemptAt = Date.distantPast
+    private var claudeUsageRefreshInFlight = false
+    private var refreshedClaudeUsage: AgentUsage?
 
     init(
         stateDirectoryURL: URL = AgentStatusMonitor.defaultStateDirectoryURL,
@@ -39,7 +46,9 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
             .appendingPathComponent(".claude.json"),
         codexSessionIndexURL: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/session_index.jsonl"),
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        claudeUsageRefresher: ClaudeUsageRefreshing? = nil,
+        currentDate: @escaping () -> Date = Date.init
     ) {
         self.stateDirectoryURL = stateDirectoryURL
         self.codexSessionsURL = codexSessionsURL
@@ -48,6 +57,8 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
         self.claudeConfigurationURL = claudeConfigurationURL
         self.codexSessionIndexURL = codexSessionIndexURL
         self.fileManager = fileManager
+        self.claudeUsageRefresher = claudeUsageRefresher
+        self.currentDate = currentDate
     }
 
     static var defaultApplicationSupportURL: URL {
@@ -62,8 +73,10 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
     func start() {
         guard timer == nil else { return }
         refresh()
+        refreshClaudeUsageIfNeeded(force: true)
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             self?.refresh()
+            self?.refreshClaudeUsageIfNeeded()
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
@@ -300,9 +313,19 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
     }
 
     private func loadClaudeUsage() -> AgentUsage? {
-        let sources = [loadClaudeStatusLineUsage(), loadClaudeCachedUsage()]
+        let persistedSources = [loadClaudeStatusLineUsage(), loadClaudeCachedUsage()]
             .compactMap { $0 }
             .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
+        let commandUsage: AgentUsage?
+        if let usage = refreshedClaudeUsage,
+           currentDate().timeIntervalSince(usage.updatedAt ?? .distantPast) <=
+           Self.claudeUsageRefreshInterval * 2 {
+            commandUsage = usage
+        } else {
+            commandUsage = nil
+        }
+        let sources: [AgentUsage] = commandUsage.map { [$0] + persistedSources }
+            ?? persistedSources
         guard !sources.isEmpty else { return nil }
 
         func newestValue(_ value: (AgentUsage) -> UInt8?) -> UInt8? {
@@ -327,6 +350,41 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
             weeklyResetsAt: newestDate(\.weeklyResetsAt),
             updatedAt: sources.compactMap(\.updatedAt).max()
         )
+    }
+
+    private func refreshClaudeUsageIfNeeded(force: Bool = false) {
+        guard let claudeUsageRefresher,
+              selectedSource != .codex,
+              !claudeUsageRefreshInFlight else {
+            return
+        }
+        let now = currentDate()
+        guard force || now.timeIntervalSince(lastClaudeUsageRefreshAttemptAt) >=
+            Self.claudeUsageRefreshInterval else {
+            return
+        }
+        lastClaudeUsageRefreshAttemptAt = now
+        claudeUsageRefreshInFlight = true
+        claudeUsageRefresher.refresh(configurationURL: claudeConfigurationURL) { [weak self] outcome in
+            guard let self else { return }
+            self.claudeUsageRefreshInFlight = false
+            switch outcome {
+            case .cacheAdvanced:
+                self.refreshedClaudeUsage = nil
+                print("[ClaudeUsage] /usage refreshed ~/.claude.json")
+            case let .commandOutput(snapshot):
+                self.refreshedClaudeUsage = AgentUsage(
+                    fiveHourRemaining: snapshot.fiveHourRemaining,
+                    weeklyRemaining: snapshot.weeklyRemaining,
+                    contextUsed: nil,
+                    updatedAt: snapshot.updatedAt
+                )
+                print("[ClaudeUsage] /usage returned fresh data without cache persistence")
+            case nil:
+                print("[ClaudeUsage] /usage refresh failed validation")
+            }
+            self.refresh()
+        }
     }
 
     private func loadClaudeStatusLineUsage() -> AgentUsage? {

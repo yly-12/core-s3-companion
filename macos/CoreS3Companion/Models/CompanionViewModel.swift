@@ -2,6 +2,8 @@ import Combine
 import Foundation
 
 final class CompanionViewModel: ObservableObject {
+    private static let statusHeartbeatInterval: TimeInterval = 15
+
     @Published private(set) var devices: [DiscoveredDevice] = []
     @Published private(set) var connectionState: BLEConnectionState = .idle
     @Published private(set) var pairedDeviceID: UUID?
@@ -44,22 +46,29 @@ final class CompanionViewModel: ObservableObject {
     private let pairedDeviceStore: PairedDeviceStoring
     private let preferenceStore: AgentPreferenceStoring
     private let integrationManager: AgentIntegrationManaging
+    private let currentDate: () -> Date
     private var started = false
     private var rotationTimer: Timer?
     private var rotationIndex = 0
+    private var lastSentFingerprint: Data?
+    private var lastSentAt: Date?
 
     init(
         transport: BLETransporting = BLETransport(),
-        monitor: AgentStatusMonitoring = AgentStatusMonitor(),
+        monitor: AgentStatusMonitoring = AgentStatusMonitor(
+            claudeUsageRefresher: ClaudeCLIUsageRefresher()
+        ),
         pairedDeviceStore: PairedDeviceStoring = UserDefaultsPairedDeviceStore(),
         preferenceStore: AgentPreferenceStoring = UserDefaultsAgentPreferenceStore(),
-        integrationManager: AgentIntegrationManaging = AgentIntegrationManager()
+        integrationManager: AgentIntegrationManaging = AgentIntegrationManager(),
+        currentDate: @escaping () -> Date = Date.init
     ) {
         self.transport = transport
         self.monitor = monitor
         self.pairedDeviceStore = pairedDeviceStore
         self.preferenceStore = preferenceStore
         self.integrationManager = integrationManager
+        self.currentDate = currentDate
         selectedAgentSource = preferenceStore.selectedSource
         defaultAgentTool = preferenceStore.defaultTool
         displaySleepTimeoutOnBattery = preferenceStore.displaySleepTimeoutOnBattery
@@ -83,7 +92,7 @@ final class CompanionViewModel: ObservableObject {
             self.pairedDeviceID = deviceID
             self.pairedDeviceName = name
             self.lastError = nil
-            self.sendCurrentSnapshot()
+            self.sendCurrentSnapshot(force: true)
         }
         transport.onError = { [weak self] message in
             self?.lastError = message
@@ -166,17 +175,35 @@ final class CompanionViewModel: ObservableObject {
         })
     }
 
-    private func sendCurrentSnapshot() {
+    private func sendCurrentSnapshot(force: Bool = false) {
+        let now = currentDate()
         guard isConnected,
               let packet = try? AgentStatusMessageEncoder.encode(
                   agentSnapshot,
                   screenTimeoutOnBattery: displaySleepTimeoutOnBattery,
                   screenTimeoutOnExternalPower: displaySleepTimeoutOnExternalPower,
-                  activityAt: agentSnapshots.compactMap(\.updatedAt).max()
+                  activityAt: agentSnapshots.compactMap(\.updatedAt).max(),
+                  now: now
               ) else {
             return
         }
-        _ = transport.send(packet)
+        let heartbeatDue = lastSentAt.map {
+            now.timeIntervalSince($0) >= Self.statusHeartbeatInterval
+        } ?? true
+        let fingerprint = statusFingerprint(for: packet)
+        guard force || fingerprint != lastSentFingerprint || heartbeatDue else { return }
+        guard transport.send(packet) else { return }
+        lastSentFingerprint = fingerprint
+        lastSentAt = now
+    }
+
+    private func statusFingerprint(for packet: Data) -> Data {
+        var fingerprint = packet
+        // The four-byte activity token sits before the two reset countdowns.
+        // It can advance every poll without changing anything visible on CoreS3.
+        guard fingerprint.count >= 8 else { return fingerprint }
+        fingerprint.replaceSubrange((fingerprint.count - 8)..<(fingerprint.count - 4), with: repeatElement(0, count: 4))
+        return fingerprint
     }
 
     private func receive(_ snapshots: [AgentSnapshot]) {

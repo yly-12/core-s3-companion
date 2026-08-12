@@ -64,7 +64,9 @@ struct AgentStatusMessageTests {
         #expect(UsageResetCountdown.display(minutes: 121, weekly: false) == "2H1m")
         #expect(UsageResetCountdown.display(minutes: 4_800, weekly: true) == "3D8H")
         #expect(UsageResetCountdown.display(minutes: 1_112, weekly: true) == "18H32m")
-        #expect(UsageResetCountdown.display(minutes: 48, weekly: false) == "0H48m")
+        #expect(UsageResetCountdown.display(minutes: 48, weekly: false) == "48m")
+        #expect(UsageResetCountdown.display(minutes: 0, weekly: false) == "0m")
+        #expect(UsageResetCountdown.display(minutes: 60, weekly: false) == "1H0m")
     }
 
     @Test("Unknown metrics use the sentinel value")
@@ -98,6 +100,81 @@ struct CPUUsageCalculatorTests {
         _ = calculator.consume(CPUTicks(user: 10, system: 10, idle: 80, nice: 0))
         let result = calculator.consume(CPUTicks(user: 20, system: 20, idle: 160, nice: 0))
         #expect(result == 20)
+    }
+}
+
+@Suite("Claude usage refresher")
+struct ClaudeUsageRefresherTests {
+    @Test("Uses the isolated non-interactive Claude usage command")
+    func usesSafeUsageCommand() {
+        #expect(ClaudeCLIUsageRefresher.arguments == [
+            "--safe-mode",
+            "--no-session-persistence",
+            "--tools", "",
+            "--max-turns", "1",
+            "--output-format", "json",
+            "-p", "/usage",
+        ])
+    }
+
+    @Test("Accepts only zero-inference usage output")
+    func parsesVerifiedUsageOutput() throws {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let response = try jsonData([
+            "subtype": "success",
+            "is_error": false,
+            "num_turns": 0,
+            "total_cost_usd": 0,
+            "usage": [
+                "input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 0,
+            ],
+            "modelUsage": [String: Any](),
+            "result": """
+                Current session: 45% used · resets Aug 12 at 2:40pm
+                Current week (all models): 25% used · resets Aug 18 at 11am
+                """,
+        ])
+
+        let snapshot = ClaudeCLIUsageRefresher.parseVerifiedResponse(response, now: now)
+        #expect(snapshot?.fiveHourRemaining == 55)
+        #expect(snapshot?.weeklyRemaining == 75)
+        #expect(snapshot?.updatedAt == now)
+    }
+
+    @Test("Rejects usage output that consumed model tokens")
+    func rejectsInferenceOutput() throws {
+        let response = try jsonData([
+            "subtype": "success",
+            "is_error": false,
+            "num_turns": 1,
+            "total_cost_usd": 0.01,
+            "usage": [
+                "input_tokens": 10,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 5,
+            ],
+            "modelUsage": ["claude": ["inputTokens": 10]],
+            "result": "Current session: 45% used",
+        ])
+
+        #expect(ClaudeCLIUsageRefresher.parseVerifiedResponse(response) == nil)
+    }
+
+    @Test("Reads only the Claude cache fetch timestamp")
+    func readsCacheTimestamp() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("core-s3-claude-cache-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try jsonData([
+            "cachedUsageUtilization": ["fetchedAtMs": 1_234_567],
+            "oauthAccount": ["accessToken": "must-not-be-read"],
+        ]).write(to: url)
+
+        #expect(ClaudeCLIUsageRefresher.cachedFetchedAtMs(at: url) == 1_234_567)
     }
 }
 
@@ -468,6 +545,54 @@ struct AgentStatusMonitorTests {
         #expect(snapshot?.contextUsed == 30)
     }
 
+    @Test("Prefers verified CLI usage over a newer stale status-line file")
+    func prefersVerifiedCLIUsage() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("core-s3-claude-cli-\(UUID().uuidString)", isDirectory: true)
+        let states = root.appendingPathComponent("state", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: states, withIntermediateDirectories: true)
+        let now = Date()
+        try jsonData([
+            "sessionID": "claude-cli-session",
+            "state": "running",
+            "title": "Claude CLI refresh",
+            "updatedAt": now.timeIntervalSince1970,
+        ]).write(to: states.appendingPathComponent("claude-session-cli.json"))
+        try jsonData([
+            "fiveHourUsed": 10,
+            "weeklyUsed": 20,
+            "updatedAt": now.addingTimeInterval(60).timeIntervalSince1970,
+        ]).write(to: states.appendingPathComponent("claude-usage.json"))
+
+        let refresher = MockClaudeUsageRefresher(outcome: .commandOutput(
+            ClaudeUsageRefreshSnapshot(
+                fiveHourRemaining: 55,
+                weeklyRemaining: 75,
+                updatedAt: now
+            )
+        ))
+        let monitor = AgentStatusMonitor(
+            stateDirectoryURL: states,
+            codexSessionsURL: root.appendingPathComponent("no-codex"),
+            claudeSessionsURL: root.appendingPathComponent("no-claude-sessions"),
+            claudeProjectsURL: root.appendingPathComponent("no-claude-projects"),
+            claudeConfigurationURL: root.appendingPathComponent("no-claude-configuration"),
+            codexSessionIndexURL: root.appendingPathComponent("no-codex-index"),
+            claudeUsageRefresher: refresher,
+            currentDate: { now }
+        )
+        monitor.selectedSource = .claude
+        var snapshot: AgentSnapshot?
+        monitor.onSnapshots = { snapshot = $0.first }
+        monitor.start()
+        defer { monitor.stop() }
+
+        #expect(refresher.callCount == 1)
+        #expect(snapshot?.fiveHourRemaining == 55)
+        #expect(snapshot?.weeklyRemaining == 75)
+    }
+
     @Test("Uses explicit Claude model context windows")
     func usesExplicitClaudeModelContextWindows() {
         #expect(ClaudeModelContextWindow.tokens(for: "claude-opus-5") == 1_000_000)
@@ -578,6 +703,45 @@ struct CompanionViewModelTests {
         _ = model
     }
 
+    @Test("Suppresses unchanged snapshots until the BLE heartbeat is due")
+    func suppressesUnchangedSnapshotsUntilHeartbeat() {
+        let transport = MockBLETransport()
+        let monitor = MockAgentStatusMonitor()
+        var now = Date(timeIntervalSince1970: 1_000)
+        let model = makeModel(
+            transport: transport,
+            monitor: monitor,
+            currentDate: { now }
+        )
+        var snapshot = AgentSnapshot(
+            source: .claude,
+            state: .running,
+            title: "Heartbeat",
+            fiveHourRemaining: 80,
+            weeklyRemaining: 70,
+            contextUsed: 20,
+            updatedAt: now
+        )
+        transport.onStateChange?(.connected(UUID()))
+
+        monitor.onSnapshots?([snapshot])
+        monitor.onSnapshots?([snapshot])
+        #expect(transport.sentPackets.count == 1)
+
+        snapshot.updatedAt = now.addingTimeInterval(1)
+        monitor.onSnapshots?([snapshot])
+        #expect(transport.sentPackets.count == 1)
+
+        now.addTimeInterval(14)
+        monitor.onSnapshots?([snapshot])
+        #expect(transport.sentPackets.count == 1)
+
+        now.addTimeInterval(1)
+        monitor.onSnapshots?([snapshot])
+        #expect(transport.sentPackets.count == 2)
+        _ = model
+    }
+
     @Test("Rotates active sessions before sending")
     func rotatesActiveSessions() throws {
         let transport = MockBLETransport()
@@ -664,14 +828,16 @@ private func makeModel(
     transport: MockBLETransport = MockBLETransport(),
     monitor: MockAgentStatusMonitor = MockAgentStatusMonitor(),
     pairedStore: MemoryPairedDeviceStore = MemoryPairedDeviceStore(),
-    preferenceStore: MemoryAgentPreferenceStore = MemoryAgentPreferenceStore()
+    preferenceStore: MemoryAgentPreferenceStore = MemoryAgentPreferenceStore(),
+    currentDate: @escaping () -> Date = Date.init
 ) -> CompanionViewModel {
     CompanionViewModel(
         transport: transport,
         monitor: monitor,
         pairedDeviceStore: pairedStore,
         preferenceStore: preferenceStore,
-        integrationManager: MockAgentIntegrationManager()
+        integrationManager: MockAgentIntegrationManager(),
+        currentDate: currentDate
     )
 }
 
@@ -723,6 +889,23 @@ private final class MockAgentIntegrationManager: AgentIntegrationManaging {
     }
     func install(_ kind: AgentIntegrationKind) throws {}
     func uninstall(_ kind: AgentIntegrationKind) throws {}
+}
+
+private final class MockClaudeUsageRefresher: ClaudeUsageRefreshing {
+    private let outcome: ClaudeUsageRefreshOutcome?
+    private(set) var callCount = 0
+
+    init(outcome: ClaudeUsageRefreshOutcome?) {
+        self.outcome = outcome
+    }
+
+    func refresh(
+        configurationURL: URL,
+        completion: @escaping (ClaudeUsageRefreshOutcome?) -> Void
+    ) {
+        callCount += 1
+        completion(outcome)
+    }
 }
 
 private func jsonData(_ object: [String: Any]) throws -> Data {

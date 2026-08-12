@@ -164,7 +164,7 @@ void testAgentStatusRejectsInvalidMetric() {
           frame, sizeof(frame), message)));
 }
 
-void testAgentStatusBecomesStaleAfterThreeSeconds() {
+void testAgentStatusBecomesStaleAfterTwentySeconds() {
   companion::app::CompanionState state;
   companion::protocol::AgentStatusMessage message;
   message.state = companion::protocol::AgentRunState::kRunning;
@@ -172,11 +172,11 @@ void testAgentStatusBecomesStaleAfterThreeSeconds() {
   state.setConnected(true);
   state.setAgentStatus(message, 1000);
 
-  state.update(3999);
+  state.update(20999);
   TEST_ASSERT_TRUE(state.hasFreshStatus());
   TEST_ASSERT_EQUAL_STRING("STATUS UI", state.status().title);
 
-  state.update(4000);
+  state.update(21000);
   TEST_ASSERT_FALSE(state.hasFreshStatus());
 }
 
@@ -330,7 +330,7 @@ int main(int, char**) {
   RUN_TEST(testAgentStatusRejectsInvalidLength);
   RUN_TEST(testAgentStatusRejectsInvalidState);
   RUN_TEST(testAgentStatusRejectsInvalidMetric);
-  RUN_TEST(testAgentStatusBecomesStaleAfterThreeSeconds);
+  RUN_TEST(testAgentStatusBecomesStaleAfterTwentySeconds);
   RUN_TEST(testDisconnectImmediatelyHidesAgentStatus);
   RUN_TEST(testDisplaySleepsAfterConfiguredInactivity);
   RUN_TEST(testRepeatedStatusDoesNotPostponeDisplaySleep);

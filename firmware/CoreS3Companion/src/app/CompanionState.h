@@ -9,7 +9,7 @@ namespace app {
 
 class CompanionState {
  public:
-  static constexpr std::uint32_t kSampleTimeoutMs = 3000;
+  static constexpr std::uint32_t kSampleTimeoutMs = 20000;
 
   void setConnected(bool connected);
   void setAgentStatus(const protocol::AgentStatusMessage& status,

@@ -30,6 +30,18 @@ const char* sourceLabel(const protocol::AgentSource source) {
   return "AGENT";
 }
 
+std::uint16_t sourceColor(const protocol::AgentSource source) {
+  switch (source) {
+    case protocol::AgentSource::kClaude:
+      return color(217, 119, 87);  // Claude terracotta
+    case protocol::AgentSource::kCodex:
+      return color(16, 163, 127);  // OpenAI green
+    case protocol::AgentSource::kAutomatic:
+      return color(124, 135, 130);
+  }
+  return color(124, 135, 130);
+}
+
 const char* stateLabel(const protocol::AgentRunState state) {
   switch (state) {
     case protocol::AgentRunState::kIdle:
@@ -93,6 +105,10 @@ void formatResetCountdown(char* text, const std::size_t textSize,
     std::snprintf(text, textSize, "%uD%uH", days, hours);
     return;
   }
+  if (minutes < 60U) {
+    std::snprintf(text, textSize, "%um", minutes);
+    return;
+  }
   const auto hours = minutes / 60U;
   const auto remainingMinutes = minutes % 60U;
   std::snprintf(text, textSize, "%uH%um", hours, remainingMinutes);
@@ -126,9 +142,14 @@ void drawMetric(const char* label, const std::uint8_t value,
 }  // namespace
 
 void DisplayRenderer::begin() {
-  const auto config = M5.config();
+  auto config = M5.config();
+  config.output_power = false;
+  config.internal_imu = false;
+  config.internal_mic = false;
+  config.internal_spk = false;
   M5.begin(config);
   M5.Display.setRotation(1);
+  M5.Display.setBrightness(96);
   M5.Display.fillScreen(TFT_BLACK);
 }
 
@@ -179,7 +200,9 @@ void DisplayRenderer::render(const app::CompanionState& state) {
 
   const char* agent = state.hasFreshStatus() ? sourceLabel(status.source)
                                              : "AGENT";
-  drawText(agent, 16, 11, 2, muted);
+  const std::uint16_t agentColor =
+      state.hasFreshStatus() ? sourceColor(status.source) : muted;
+  drawText(agent, 16, 11, 2, agentColor);
   char battery[12];
   if (state.batteryLevel() == protocol::kUnknownMetricValue) {
     std::snprintf(battery, sizeof(battery), "BAT --");
