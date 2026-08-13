@@ -1,2 +1,2 @@
 // Single source of truth for the release version.
-MARKETING_VERSION = 0.0.3
+MARKETING_VERSION = 0.0.4
