@@ -233,6 +233,19 @@ struct AgentIntegrationManagerTests {
         let stateURL = support.appendingPathComponent("state/claude-session-claude-test-session.json")
         let hookState = try jsonObject(at: stateURL)
         #expect(hookState["title"] as? String == "core-s3")
+        #expect(hookState["state"] as? String == "waiting_authorization")
+        try runHook(
+            scriptURL: hookScript,
+            source: "claude",
+            payload: [
+                "session_id": "claude-test-session",
+                "hook_event_name": "PermissionRequest",
+                "tool_name": "ExitPlanMode",
+                "cwd": "/tmp/core-s3",
+            ]
+        )
+        let replyState = try jsonObject(at: stateURL)
+        #expect(replyState["state"] as? String == "waiting_reply")
         try runHook(
             scriptURL: hookScript,
             source: "claude-status",
@@ -249,7 +262,7 @@ struct AgentIntegrationManagerTests {
             ]
         )
         let state = try jsonObject(at: stateURL)
-        #expect(state["state"] as? String == "waiting_authorization")
+        #expect(state["state"] as? String == "waiting_reply")
 
         let claudeProjectsURL = root.appendingPathComponent("claude-projects/project", isDirectory: true)
         try FileManager.default.createDirectory(at: claudeProjectsURL, withIntermediateDirectories: true)
@@ -543,6 +556,52 @@ struct AgentStatusMonitorTests {
         #expect(snapshot?.fiveHourRemaining == 75)
         #expect(snapshot?.weeklyRemaining == 60)
         #expect(snapshot?.contextUsed == 30)
+    }
+
+    @Test("Clears stale Claude authorization after the user rejects a plan")
+    func clearsRejectedClaudeAuthorization() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("core-s3-claude-rejection-\(UUID().uuidString)", isDirectory: true)
+        let states = root.appendingPathComponent("state", isDirectory: true)
+        let projects = root.appendingPathComponent("projects/workspace", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: states, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
+
+        let sessionID = "claude-rejected-plan"
+        let permissionAt = Date().addingTimeInterval(-5)
+        let rejectedAt = permissionAt.addingTimeInterval(2)
+        try jsonData([
+            "sessionID": sessionID,
+            "state": "waiting_authorization",
+            "title": "Claude plan",
+            "updatedAt": permissionAt.timeIntervalSince1970,
+        ]).write(to: states.appendingPathComponent("claude-session-plan.json"))
+        try jsonText([
+            "type": "user",
+            "timestamp": isoTimestamp(rejectedAt),
+            "toolUseResult": "User rejected tool use",
+        ]).write(
+            to: projects.appendingPathComponent("\(sessionID).jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let monitor = AgentStatusMonitor(
+            stateDirectoryURL: states,
+            codexSessionsURL: root.appendingPathComponent("no-codex"),
+            claudeSessionsURL: root.appendingPathComponent("no-claude-sessions"),
+            claudeProjectsURL: root.appendingPathComponent("projects"),
+            claudeConfigurationURL: root.appendingPathComponent("no-claude-configuration"),
+            codexSessionIndexURL: root.appendingPathComponent("no-codex-index")
+        )
+        monitor.selectedSource = .claude
+        var snapshot: AgentSnapshot?
+        monitor.onSnapshots = { snapshot = $0.first }
+        monitor.refresh()
+
+        #expect(snapshot?.state == .waitingReply)
+        #expect(abs((snapshot?.updatedAt?.timeIntervalSince1970 ?? 0) - rejectedAt.timeIntervalSince1970) < 0.01)
     }
 
     @Test("Prefers verified CLI usage over a newer stale status-line file")

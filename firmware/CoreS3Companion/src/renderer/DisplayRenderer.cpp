@@ -13,6 +13,16 @@ namespace renderer {
 
 namespace {
 
+constexpr std::int32_t kScreenWidth = 320;
+
+bool updateSignature(std::string& previous, const char* current) {
+  if (previous == current) {
+    return false;
+  }
+  previous = current;
+  return true;
+}
+
 std::uint16_t color(const std::uint8_t red, const std::uint8_t green,
                     const std::uint8_t blue) {
   return M5.Display.color565(red, green, blue);
@@ -158,7 +168,7 @@ void DisplayRenderer::render(const app::CompanionState& state) {
     if (displayAwake_) {
       M5.Display.sleep();
       displayAwake_ = false;
-      lastSignature_.clear();
+      clearSignatures();
     }
     return;
   }
@@ -166,108 +176,144 @@ void DisplayRenderer::render(const app::CompanionState& state) {
   if (!displayAwake_) {
     M5.Display.wakeup();
     displayAwake_ = true;
-    lastSignature_.clear();
+    clearSignatures();
   }
 
   const auto& status = state.status();
-  const bool alertState =
-      state.hasFreshStatus() &&
-      (status.state == protocol::AgentRunState::kWaitingAuthorization ||
-       status.state == protocol::AgentRunState::kWaitingReply);
-  const bool alertTextVisible = !alertState || (millis() / 500) % 2 == 0;
+  const bool hasFreshStatus = state.hasFreshStatus();
+  const protocol::AgentSource displayedSource =
+      hasFreshStatus ? status.source : protocol::AgentSource::kAutomatic;
+  const protocol::AgentRunState displayedState =
+      hasFreshStatus ? status.state : protocol::AgentRunState::kIdle;
+  const std::uint8_t fiveHourRemaining =
+      hasFreshStatus ? status.fiveHourRemaining
+                     : protocol::kUnknownMetricValue;
+  const std::uint8_t weeklyRemaining =
+      hasFreshStatus ? status.weeklyRemaining
+                     : protocol::kUnknownMetricValue;
+  const std::uint8_t contextUsed =
+      hasFreshStatus ? status.contextUsed : protocol::kUnknownMetricValue;
+  const std::uint16_t fiveHourResetMinutes =
+      hasFreshStatus ? status.fiveHourResetMinutes
+                     : protocol::kUnknownResetMinutes;
+  const std::uint16_t weeklyResetMinutes =
+      hasFreshStatus ? status.weeklyResetMinutes
+                     : protocol::kUnknownResetMinutes;
+  const char* title = hasFreshStatus && status.title[0] != '\0'
+                          ? status.title
+                          : "NO ACTIVE SESSION";
+  const char* modelName = hasFreshStatus && status.modelName[0] != '\0'
+                              ? status.modelName
+                              : "MODEL --";
+  const char* effortValue =
+      hasFreshStatus && status.effort[0] != '\0' ? status.effort : "--";
+
   char signature[256];
   std::snprintf(
-      signature, sizeof(signature),
-      "%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%u|%s|%s|%s",
-      state.isConnected(), state.hasFreshStatus(),
-      static_cast<unsigned>(status.source),
-      static_cast<unsigned>(status.state), status.fiveHourRemaining,
-      status.weeklyRemaining, status.contextUsed, state.batteryLevel(),
-      state.isExternalPowerConnected(), state.isBatteryCharging(),
-      status.displayTimeoutOnBatteryMinutes,
-      status.displayTimeoutOnExternalPowerMinutes, status.fiveHourResetMinutes,
-      status.weeklyResetMinutes, alertTextVisible, status.title,
-      status.modelName, status.effort);
-  if (lastSignature_ == signature) {
+      signature, sizeof(signature), "%u|%u|%u|%u",
+      static_cast<unsigned>(displayedSource), state.batteryLevel(),
+      state.isBatteryCharging(), hasFreshStatus);
+  const bool headerDirty = updateSignature(headerSignature_, signature);
+
+  std::snprintf(signature, sizeof(signature), "%u|%s", hasFreshStatus, title);
+  const bool titleDirty = updateSignature(titleSignature_, signature);
+
+  std::snprintf(signature, sizeof(signature), "%u|%u", hasFreshStatus,
+                static_cast<unsigned>(displayedState));
+  const bool stateDirty = updateSignature(stateSignature_, signature);
+
+  std::snprintf(
+      signature, sizeof(signature), "%u|%u|%u|%u|%u|%u|%u",
+      hasFreshStatus, static_cast<unsigned>(displayedSource),
+      fiveHourRemaining, weeklyRemaining, contextUsed,
+      fiveHourResetMinutes, weeklyResetMinutes);
+  const bool metricsDirty = updateSignature(metricsSignature_, signature);
+
+  std::snprintf(signature, sizeof(signature), "%u|%s|%s", hasFreshStatus,
+                modelName, effortValue);
+  const bool footerDirty = updateSignature(footerSignature_, signature);
+
+  if (!headerDirty && !titleDirty && !stateDirty && !metricsDirty &&
+      !footerDirty) {
     return;
   }
-  lastSignature_ = signature;
 
-  M5.Display.fillScreen(TFT_BLACK);
   const std::uint16_t primary = color(242, 245, 243);
   const std::uint16_t muted = color(124, 135, 130);
   const std::uint16_t grid = color(23, 49, 40);
+  M5.Display.startWrite();
 
-  const char* agent = state.hasFreshStatus() ? sourceLabel(status.source)
-                                             : "AGENT";
-  const std::uint16_t agentColor =
-      state.hasFreshStatus() ? sourceColor(status.source) : muted;
-  drawText(agent, 16, 11, 2, agentColor);
-  char battery[12];
-  if (state.batteryLevel() == protocol::kUnknownMetricValue) {
-    std::snprintf(battery, sizeof(battery), "BAT --");
-  } else {
-    std::snprintf(battery, sizeof(battery), "BAT %u%%", state.batteryLevel());
+  if (headerDirty) {
+    M5.Display.fillRect(0, 0, kScreenWidth, 35, TFT_BLACK);
+    const char* agent =
+        hasFreshStatus ? sourceLabel(displayedSource) : "AGENT";
+    const std::uint16_t agentColor =
+        hasFreshStatus ? sourceColor(displayedSource) : muted;
+    drawText(agent, 16, 11, 2, agentColor);
+    char battery[12];
+    if (state.batteryLevel() == protocol::kUnknownMetricValue) {
+      std::snprintf(battery, sizeof(battery), "BAT --");
+    } else {
+      std::snprintf(battery, sizeof(battery), "BAT %u%%",
+                    state.batteryLevel());
+    }
+    drawText(battery, 304, 11, 2,
+             state.isBatteryCharging() ? color(70, 245, 154) : primary,
+             top_right);
+    M5.Display.drawFastHLine(16, 34, 288, grid);
   }
-  drawText(battery, 304, 11, 2,
-           state.isBatteryCharging() ? color(70, 245, 154) : primary,
-           top_right);
-  M5.Display.drawFastHLine(16, 34, 288, grid);
 
-  const char* title = state.hasFreshStatus() && status.title[0] != '\0'
-                          ? status.title
-                          : "NO ACTIVE SESSION";
-  drawTitle(title);
-
-  protocol::AgentRunState displayedState = protocol::AgentRunState::kIdle;
-  if (state.hasFreshStatus()) {
-    displayedState = status.state;
+  if (titleDirty) {
+    M5.Display.fillRect(0, 35, kScreenWidth, 41, TFT_BLACK);
+    drawTitle(title);
   }
-  const std::uint16_t accent = state.hasFreshStatus()
-                                   ? stateColor(displayedState)
-                                   : muted;
-  M5.Display.fillRect(16, 76, 8, 50, accent);
-  if (alertTextVisible) {
+
+  if (stateDirty) {
+    M5.Display.fillRect(0, 76, kScreenWidth, 68, TFT_BLACK);
+    const std::uint16_t accent =
+        hasFreshStatus ? stateColor(displayedState) : muted;
+    M5.Display.fillRect(16, 76, 8, 50, accent);
     drawText(stateLabel(displayedState), 40, 80, 5, accent);
   }
 
-  M5.Display.drawFastHLine(16, 144, 288, grid);
-  const bool hideFiveHour =
-      state.hasFreshStatus() && status.source == protocol::AgentSource::kCodex &&
-      status.fiveHourRemaining == protocol::kUnknownMetricValue;
-  if (hideFiveHour) {
-    drawMetric("WK", status.weeklyRemaining, status.weeklyResetMinutes, true,
-               16, 136, color(70, 245, 154));
-    drawMetric("CTX", status.contextUsed, protocol::kUnknownResetMinutes,
-               false, 168, 136, color(255, 200, 87));
-  } else {
-    drawMetric("5H", state.hasFreshStatus() ? status.fiveHourRemaining
-                                             : protocol::kUnknownMetricValue,
-               state.hasFreshStatus() ? status.fiveHourResetMinutes
-                                      : protocol::kUnknownResetMinutes,
-               false, 16, 86, color(70, 245, 154));
-    drawMetric("WK", state.hasFreshStatus() ? status.weeklyRemaining
-                                             : protocol::kUnknownMetricValue,
-               state.hasFreshStatus() ? status.weeklyResetMinutes
-                                      : protocol::kUnknownResetMinutes,
-               true, 117, 86, color(70, 245, 154));
-    drawMetric("CTX", state.hasFreshStatus() ? status.contextUsed
-                                              : protocol::kUnknownMetricValue,
-               protocol::kUnknownResetMinutes, false, 218, 86,
-               color(255, 200, 87));
+  if (metricsDirty) {
+    M5.Display.fillRect(0, 144, kScreenWidth, 71, TFT_BLACK);
+    M5.Display.drawFastHLine(16, 144, 288, grid);
+    const bool hideFiveHour =
+        hasFreshStatus && displayedSource == protocol::AgentSource::kCodex &&
+        fiveHourRemaining == protocol::kUnknownMetricValue;
+    if (hideFiveHour) {
+      drawMetric("WK", weeklyRemaining, weeklyResetMinutes, true, 16, 136,
+                 color(70, 245, 154));
+      drawMetric("CTX", contextUsed, protocol::kUnknownResetMinutes, false, 168,
+                 136, color(255, 200, 87));
+    } else {
+      drawMetric("5H", fiveHourRemaining, fiveHourResetMinutes, false, 16, 86,
+                 color(70, 245, 154));
+      drawMetric("WK", weeklyRemaining, weeklyResetMinutes, true, 117, 86,
+                 color(70, 245, 154));
+      drawMetric("CTX", contextUsed, protocol::kUnknownResetMinutes, false, 218,
+                 86, color(255, 200, 87));
+    }
   }
 
-  const char* modelName = state.hasFreshStatus() && status.modelName[0] != '\0'
-                              ? status.modelName
-                              : "MODEL --";
-  char effort[16];
-  if (state.hasFreshStatus() && status.effort[0] != '\0') {
-    std::snprintf(effort, sizeof(effort), "EFF %s", status.effort);
-  } else {
-    std::snprintf(effort, sizeof(effort), "EFF --");
+  if (footerDirty) {
+    M5.Display.fillRect(0, 215, kScreenWidth, 25, TFT_BLACK);
+    char effort[16];
+    std::snprintf(effort, sizeof(effort), "EFF %s", effortValue);
+    drawText(modelName, 16, 218, 2, primary);
+    drawText(effort, 304, 218, 2, muted, top_right);
   }
-  drawText(modelName, 16, 218, 2, primary);
-  drawText(effort, 304, 218, 2, muted, top_right);
+
+  M5.Display.endWrite();
+}
+
+void DisplayRenderer::clearSignatures() {
+  headerSignature_.clear();
+  titleSignature_.clear();
+  stateSignature_.clear();
+  metricsSignature_.clear();
+  footerSignature_.clear();
 }
 
 }  // namespace renderer

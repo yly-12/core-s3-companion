@@ -152,10 +152,18 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
     ) -> [AgentSnapshot] {
         records.map { record in
             let transcript = transcriptUsage[record.sessionID]
+            var state = record.state
+            var updatedAt = record.updatedAt
+            if let rejectedAt = transcript?.userRejectedAt,
+               rejectedAt > (record.updatedAt ?? .distantPast),
+               state == .waitingAuthorization || state == .waitingReply {
+                state = .waitingReply
+                updatedAt = rejectedAt
+            }
             return AgentSnapshot(
                 sessionID: record.sessionID,
                 source: record.source,
-                state: record.state,
+                state: state,
                 title: nonEmpty(sessionTitles[record.sessionID])
                     ?? nonEmpty(transcript?.aiTitle)
                     ?? nonEmpty(record.title)
@@ -167,7 +175,7 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
                 contextUsed: record.contextUsed ?? transcript?.contextUsed ?? fallbackUsage?.contextUsed,
                 fiveHourResetsAt: fallbackUsage?.fiveHourResetsAt,
                 weeklyResetsAt: fallbackUsage?.weeklyResetsAt,
-                updatedAt: record.updatedAt ?? fallbackUsage?.updatedAt
+                updatedAt: updatedAt ?? fallbackUsage?.updatedAt
             )
         }
     }
@@ -663,6 +671,7 @@ struct ClaudeTranscriptUsage {
     var aiTitle: String?
     var modelName: String?
     var contextUsed: UInt8?
+    var userRejectedAt: Date?
 }
 
 private struct ClaudeTranscriptCacheEntry {
@@ -680,6 +689,7 @@ enum ClaudeTranscriptReader {
         var aiTitle: String?
         var modelName: String?
         var contextUsed: UInt8?
+        var userRejectedAt: Date?
         contents.enumerateLines { line, _ in
             guard let data = line.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -692,6 +702,14 @@ enum ClaudeTranscriptReader {
                 if !title.isEmpty {
                     aiTitle = title
                 }
+                return
+            }
+
+            if object["type"] as? String == "user",
+               object["toolUseResult"] as? String == "User rejected tool use",
+               let timestamp = object["timestamp"] as? String,
+               let date = iso8601Date(timestamp) {
+                userRejectedAt = date
                 return
             }
 
@@ -711,12 +729,21 @@ enum ClaudeTranscriptReader {
                 UInt8(max(0, min(100, (contextTokens / $0 * 100).rounded())))
             }
         }
-        guard aiTitle != nil || modelName != nil || contextUsed != nil else { return nil }
+        guard aiTitle != nil || modelName != nil || contextUsed != nil || userRejectedAt != nil else {
+            return nil
+        }
         return ClaudeTranscriptUsage(
             aiTitle: aiTitle,
             modelName: modelName,
-            contextUsed: contextUsed
+            contextUsed: contextUsed,
+            userRejectedAt: userRejectedAt
         )
+    }
+
+    private static func iso8601Date(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
     }
 
     private static func number(_ value: Any?) -> Double {

@@ -25,7 +25,7 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
 
     private let originalClaudeStatusLineKey = "_coreS3CompanionOriginalStatusLine"
     private let managedScriptNeedle = "core-s3-agent-hook.js"
-    private let managedAssetMarker = "core-s3-hook-schema-v6"
+    private let managedAssetMarker = "core-s3-hook-schema-v7"
 
     init(
         homeURL: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -372,7 +372,7 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
     }
 
     private static let jxaHookScript = #"""
-    // core-s3-hook-schema-v6
+    // core-s3-hook-schema-v7
     ObjC.import('Foundation');
 
     function readInput() {
@@ -519,10 +519,15 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
       var event = String(payload.hook_event_name || payload.hookEventName || '');
       var state = String(previous.state || 'idle');
       var notification = String(payload.notification_type || payload.subtype || '').toLowerCase();
+      var toolName = String(payload.tool_name || payload.toolName || '');
 
       if (event === 'SessionStart' || event === 'SessionEnd') state = 'idle';
       if (event === 'UserPromptSubmit' || event === 'PreToolUse' || event === 'PostToolUse' || event === 'PostToolUseFailure') state = 'running';
-      if (event === 'PermissionRequest') state = 'waiting_authorization';
+      if (event === 'PermissionRequest') {
+        state = (toolName === 'AskUserQuestion' || toolName === 'ExitPlanMode')
+          ? 'waiting_reply'
+          : 'waiting_authorization';
+      }
       if (event === 'Notification' && notification.indexOf('permission') >= 0) state = 'waiting_authorization';
       if (event === 'Notification' && (notification.indexOf('idle') >= 0 || notification.indexOf('question') >= 0 || notification.indexOf('elicitation') >= 0 || notification.indexOf('away_summary') >= 0)) state = 'waiting_reply';
       if (event === 'Stop' || event === 'StopFailure') state = 'completed';

@@ -82,6 +82,13 @@ bool BlePeripheral::begin() {
   return true;
 }
 
+void BlePeripheral::setEventTask(TaskHandle_t task) { eventTask_.store(task); }
+
+bool BlePeripheral::waitForEvent(const std::uint32_t timeoutMs) {
+  const TickType_t timeoutTicks = pdMS_TO_TICKS(timeoutMs);
+  return ulTaskNotifyTake(pdTRUE, timeoutTicks > 0 ? timeoutTicks : 1) > 0;
+}
+
 bool BlePeripheral::isConnected() const { return connected_.load(); }
 
 bool BlePeripheral::receiveAgentStatus(protocol::AgentStatusMessage& status) {
@@ -91,6 +98,7 @@ bool BlePeripheral::receiveAgentStatus(protocol::AgentStatusMessage& status) {
 
 void BlePeripheral::handleConnectionChanged(const bool connected) {
   connected_.store(connected);
+  notifyEventTask();
   if (connected) {
     Serial.println("[BLE] Mac connected");
     return;
@@ -121,8 +129,16 @@ void BlePeripheral::handleWrite(BLECharacteristic* characteristic) {
   if (statusQueue_ != nullptr) {
     xQueueOverwrite(statusQueue_, &status);
   }
+  notifyEventTask();
   Serial.printf("[BLE] Agent state=%u title=%s\n",
                 static_cast<unsigned>(status.state), status.title);
+}
+
+void BlePeripheral::notifyEventTask() {
+  const TaskHandle_t task = eventTask_.load();
+  if (task != nullptr) {
+    xTaskNotifyGive(task);
+  }
 }
 
 }  // namespace communication

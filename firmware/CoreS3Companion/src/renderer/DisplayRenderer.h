@@ -11,10 +11,16 @@ namespace renderer {
 class DisplayRenderer {
  public:
   void begin();
-  void render(const app::CompanionState& state);
+ void render(const app::CompanionState& state);
 
  private:
-  std::string lastSignature_;
+  void clearSignatures();
+
+  std::string headerSignature_;
+  std::string titleSignature_;
+  std::string stateSignature_;
+  std::string metricsSignature_;
+  std::string footerSignature_;
   bool displayAwake_ = true;
 };
 

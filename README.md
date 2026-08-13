@@ -69,6 +69,17 @@ pio test -e native
 
 固件启动后显示 `IDLE / OFFLINE`，设备以 `CoreS3 Companion` 名称开始广播。
 
+串口每 60 秒输出一行运行时遥测：
+
+```text
+[Runtime] cpu=80MHz loop_busy=1.23% wakeups=50.0/s heap=... min_heap=... psram=.../... bat=...mV current=...mA
+```
+
+- `loop_busy` 是 Companion `loopTask` 的忙碌时间比例，不包含 BLE 协议栈等系统任务。
+- `wakeups` 是主任务每秒被 BLE 事件或触摸轮询超时唤醒的次数。
+- `min_heap` 是启动以来内部堆的最低剩余量，用于发现内存水位持续下降。
+- `current` 正数表示充电、负数表示放电；读数来自 CoreS3 的 AXP2101。
+
 ## 2. 运行 macOS 客户端
 
 ### 准备

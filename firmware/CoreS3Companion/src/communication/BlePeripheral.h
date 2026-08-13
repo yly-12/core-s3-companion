@@ -3,6 +3,7 @@
 #include <BLEServer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/task.h>
 
 #include <atomic>
 #include <cstdint>
@@ -22,6 +23,8 @@ class BlePeripheral {
   ~BlePeripheral();
 
   bool begin();
+  void setEventTask(TaskHandle_t task);
+  bool waitForEvent(std::uint32_t timeoutMs);
   bool isConnected() const;
   bool receiveAgentStatus(protocol::AgentStatusMessage& status);
 
@@ -31,10 +34,12 @@ class BlePeripheral {
 
   void handleConnectionChanged(bool connected);
   void handleWrite(BLECharacteristic* characteristic);
+  void notifyEventTask();
 
   QueueHandle_t statusQueue_ = nullptr;
   BLEServer* server_ = nullptr;
   std::atomic_bool connected_{false};
+  std::atomic<TaskHandle_t> eventTask_{nullptr};
   ServerCallbacks* serverCallbacks_ = nullptr;
   WriteCallbacks* writeCallbacks_ = nullptr;
 };
