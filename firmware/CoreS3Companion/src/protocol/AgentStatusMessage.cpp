@@ -74,7 +74,7 @@ AgentParseResult parseAgentStatus(const std::uint8_t* data,
   if (data[1] != kAgentStatusMessageType) {
     return AgentParseResult::kUnsupportedType;
   }
-  if (data[2] > static_cast<std::uint8_t>(AgentRunState::kCompleted)) {
+  if (data[2] > static_cast<std::uint8_t>(AgentRunState::kFailed)) {
     return AgentParseResult::kInvalidState;
   }
   if (data[3] > static_cast<std::uint8_t>(AgentSource::kCodex)) {

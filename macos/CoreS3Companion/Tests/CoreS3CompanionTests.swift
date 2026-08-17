@@ -75,6 +75,15 @@ struct AgentStatusMessageTests {
         #expect(Array(Array(data)[4...6]) == [0xFF, 0xFF, 0xFF])
     }
 
+    @Test("Encodes cancelled and failed terminal states")
+    func encodesTerminalFailureStates() throws {
+        var snapshot = AgentSnapshot.idle
+        snapshot.state = .cancelled
+        #expect(try AgentStatusMessageEncoder.encode(snapshot)[2] == 5)
+        snapshot.state = .failed
+        #expect(try AgentStatusMessageEncoder.encode(snapshot)[2] == 6)
+    }
+
     @Test("Display title preserves Chinese and stays bounded")
     func sanitizesDisplayTitle() {
         let title = DisplayTitle.sanitize("修复蓝牙配对 · CoreS3 Companion")
@@ -248,6 +257,18 @@ struct AgentIntegrationManagerTests {
         #expect(replyState["state"] as? String == "waiting_reply")
         try runHook(
             scriptURL: hookScript,
+            source: "claude",
+            payload: [
+                "session_id": "claude-test-session",
+                "hook_event_name": "StopFailure",
+                "error": "server_error",
+                "last_assistant_message": "API Error: Connection lost mid-response",
+            ]
+        )
+        let failureState = try jsonObject(at: stateURL)
+        #expect(failureState["state"] as? String == "failed")
+        try runHook(
+            scriptURL: hookScript,
             source: "claude-status",
             payload: [
                 "session_id": "claude-test-session",
@@ -262,7 +283,7 @@ struct AgentIntegrationManagerTests {
             ]
         )
         let state = try jsonObject(at: stateURL)
-        #expect(state["state"] as? String == "waiting_reply")
+        #expect(state["state"] as? String == "failed")
 
         let claudeProjectsURL = root.appendingPathComponent("claude-projects/project", isDirectory: true)
         try FileManager.default.createDirectory(at: claudeProjectsURL, withIntermediateDirectories: true)
@@ -558,8 +579,8 @@ struct AgentStatusMonitorTests {
         #expect(snapshot?.contextUsed == 30)
     }
 
-    @Test("Clears stale Claude authorization after the user rejects a plan")
-    func clearsRejectedClaudeAuthorization() throws {
+    @Test("Marks a stopped Claude turn as cancelled after the user rejects a plan")
+    func detectsCancelledClaudePlan() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("core-s3-claude-rejection-\(UUID().uuidString)", isDirectory: true)
         let states = root.appendingPathComponent("state", isDirectory: true)
@@ -571,16 +592,74 @@ struct AgentStatusMonitorTests {
         let sessionID = "claude-rejected-plan"
         let permissionAt = Date().addingTimeInterval(-5)
         let rejectedAt = permissionAt.addingTimeInterval(2)
+        let stoppedAt = rejectedAt.addingTimeInterval(1)
         try jsonData([
             "sessionID": sessionID,
-            "state": "waiting_authorization",
+            "state": "completed",
             "title": "Claude plan",
-            "updatedAt": permissionAt.timeIntervalSince1970,
+            "updatedAt": stoppedAt.timeIntervalSince1970,
         ]).write(to: states.appendingPathComponent("claude-session-plan.json"))
+        let transcript = [
+            jsonText([
+                "type": "user",
+                "timestamp": isoTimestamp(rejectedAt),
+                "toolUseResult": "User rejected tool use",
+            ]),
+            jsonText([
+                "type": "user",
+                "timestamp": isoTimestamp(rejectedAt.addingTimeInterval(0.01)),
+                "message": ["content": "[Request interrupted by user for tool use]"],
+            ]),
+        ].joined(separator: "\n")
+        try transcript.write(
+            to: projects.appendingPathComponent("\(sessionID).jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let monitor = AgentStatusMonitor(
+            stateDirectoryURL: states,
+            codexSessionsURL: root.appendingPathComponent("no-codex"),
+            claudeSessionsURL: root.appendingPathComponent("no-claude-sessions"),
+            claudeProjectsURL: root.appendingPathComponent("projects"),
+            claudeConfigurationURL: root.appendingPathComponent("no-claude-configuration"),
+            codexSessionIndexURL: root.appendingPathComponent("no-codex-index")
+        )
+        monitor.selectedSource = .claude
+        var snapshot: AgentSnapshot?
+        monitor.onSnapshots = { snapshot = $0.first }
+        monitor.refresh()
+
+        #expect(snapshot?.state == .cancelled)
+        #expect(abs((snapshot?.updatedAt?.timeIntervalSince1970 ?? 0) - stoppedAt.timeIntervalSince1970) < 0.01)
+    }
+
+    @Test("Clears a running Claude state after the user interrupts the request")
+    func detectsInterruptedClaudeRequest() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("core-s3-claude-interrupt-\(UUID().uuidString)", isDirectory: true)
+        let states = root.appendingPathComponent("state", isDirectory: true)
+        let projects = root.appendingPathComponent("projects/workspace", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: states, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
+
+        let sessionID = "claude-interrupted-request"
+        let startedAt = Date().addingTimeInterval(-5)
+        let interruptedAt = startedAt.addingTimeInterval(2)
+        try jsonData([
+            "sessionID": sessionID,
+            "state": "running",
+            "title": "Claude request",
+            "updatedAt": startedAt.timeIntervalSince1970,
+        ]).write(to: states.appendingPathComponent("claude-session-interrupted.json"))
         try jsonText([
             "type": "user",
-            "timestamp": isoTimestamp(rejectedAt),
-            "toolUseResult": "User rejected tool use",
+            "timestamp": isoTimestamp(interruptedAt),
+            "message": [
+                "role": "user",
+                "content": [["type": "text", "text": "[Request interrupted by user]"]],
+            ],
         ]).write(
             to: projects.appendingPathComponent("\(sessionID).jsonl"),
             atomically: true,
@@ -600,8 +679,57 @@ struct AgentStatusMonitorTests {
         monitor.onSnapshots = { snapshot = $0.first }
         monitor.refresh()
 
-        #expect(snapshot?.state == .waitingReply)
-        #expect(abs((snapshot?.updatedAt?.timeIntervalSince1970 ?? 0) - rejectedAt.timeIntervalSince1970) < 0.01)
+        #expect(snapshot?.state == .cancelled)
+        #expect(abs((snapshot?.updatedAt?.timeIntervalSince1970 ?? 0) - interruptedAt.timeIntervalSince1970) < 0.01)
+    }
+
+    @Test("Marks a completed Claude hook record as failed from an API error transcript")
+    func detectsClaudeAPIErrorFromTranscript() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("core-s3-claude-api-error-\(UUID().uuidString)", isDirectory: true)
+        let states = root.appendingPathComponent("state", isDirectory: true)
+        let projects = root.appendingPathComponent("projects/workspace", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: states, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
+
+        let sessionID = "claude-api-error"
+        let errorAt = Date().addingTimeInterval(-2)
+        try jsonData([
+            "sessionID": sessionID,
+            "state": "completed",
+            "title": "Claude API request",
+            "updatedAt": errorAt.addingTimeInterval(1).timeIntervalSince1970,
+        ]).write(to: states.appendingPathComponent("claude-session-api-error.json"))
+        try jsonText([
+            "type": "assistant",
+            "timestamp": isoTimestamp(errorAt),
+            "isApiErrorMessage": true,
+            "error": "server_error",
+            "message": [
+                "model": "<synthetic>",
+                "content": [["type": "text", "text": "API Error: Connection lost mid-response"]],
+            ],
+        ]).write(
+            to: projects.appendingPathComponent("\(sessionID).jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let monitor = AgentStatusMonitor(
+            stateDirectoryURL: states,
+            codexSessionsURL: root.appendingPathComponent("no-codex"),
+            claudeSessionsURL: root.appendingPathComponent("no-claude-sessions"),
+            claudeProjectsURL: root.appendingPathComponent("projects"),
+            claudeConfigurationURL: root.appendingPathComponent("no-claude-configuration"),
+            codexSessionIndexURL: root.appendingPathComponent("no-codex-index")
+        )
+        monitor.selectedSource = .claude
+        var snapshot: AgentSnapshot?
+        monitor.onSnapshots = { snapshot = $0.first }
+        monitor.refresh()
+
+        #expect(snapshot?.state == .failed)
     }
 
     @Test("Prefers verified CLI usage over a newer stale status-line file")
@@ -843,6 +971,8 @@ struct CompanionViewModelTests {
         #expect(AgentRunState.waitingAuthorization.requiresUserAttention)
         #expect(AgentRunState.waitingReply.requiresUserAttention)
         #expect(!AgentRunState.running.requiresUserAttention)
+        #expect(!AgentRunState.cancelled.requiresUserAttention)
+        #expect(!AgentRunState.failed.requiresUserAttention)
 
         let transport = MockBLETransport()
         let monitor = MockAgentStatusMonitor()

@@ -65,6 +65,8 @@ enum AgentRunState: UInt8, Codable, CaseIterable {
     case waitingAuthorization = 2
     case waitingReply = 3
     case completed = 4
+    case cancelled = 5
+    case failed = 6
 
     var shortLabel: String {
         switch self {
@@ -73,6 +75,8 @@ enum AgentRunState: UInt8, Codable, CaseIterable {
         case .waitingAuthorization: "AUTH"
         case .waitingReply: "REPLY"
         case .completed: "DONE"
+        case .cancelled: "CANCEL"
+        case .failed: "ERROR"
         }
     }
 
@@ -83,6 +87,8 @@ enum AgentRunState: UInt8, Codable, CaseIterable {
         case .waitingAuthorization: "等待授权"
         case .waitingReply: "等待用户回复"
         case .completed: "已完成"
+        case .cancelled: "已取消"
+        case .failed: "执行失败"
         }
     }
 
@@ -93,6 +99,8 @@ enum AgentRunState: UInt8, Codable, CaseIterable {
         case .waitingAuthorization: "lock.fill"
         case .waitingReply: "bubble.left.fill"
         case .completed: "checkmark.circle.fill"
+        case .cancelled: "xmark.circle.fill"
+        case .failed: "exclamationmark.triangle.fill"
         }
     }
 

@@ -291,6 +291,8 @@ private struct AgentPreviewCard: View {
         case .waitingAuthorization: .orange
         case .waitingReply: .blue
         case .completed: .mint
+        case .cancelled: .orange
+        case .failed: .red
         }
     }
 }

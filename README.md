@@ -124,7 +124,10 @@ Claude 会话标题优先使用用户明确命名的 session；未明确命名�
 
 同时有多个普通活跃会话时，客户端每 3 秒轮播一次。AUTH 与 REPLY 会立即抢占普通会话，
 状态文字在设备上闪烁，并在用户处理完成前锁定展示、暂停轮播。
-状态区只显示 `IDLE / RUNNING / AUTH / REPLY / DONE` 一个主词。5H 倒计时使用
+Claude 的 `StopFailure` 会显示为 `ERROR`；取消实施计划会结合 transcript 中的用户拒绝
+记录或 `[Request interrupted by user]` 中断标记显示为 `CANCEL`，不会再误报为
+`RUNNING` 或 `DONE`。状态区只显示
+`IDLE / RUNNING / AUTH / REPLY / DONE / CANCEL / ERROR` 一个主词。5H 倒计时使用
 `2H14m` 格式；Weekly 大于等于 24 小时时使用 `3D8H`，不足 24 小时时切换为
 `18H32m` 格式。
 “配置”页可以选择默认工具（Claude 或 Codex，默认为 Claude）；它只在两边都没有活跃
@@ -132,6 +135,7 @@ session 时决定优先展示哪一边最近的状态。该页面分别配置“
 的熄屏时间，接入电源默认不熄屏；旧版本的单一熄屏设置会迁移到未接电源字段。新消息、
 供电状态变化和点击 CoreS3 屏幕都会唤醒并重新计时。RUNNING、AUTH 或 REPLY 状态存在时
 屏幕会保持点亮，只有计时到期且当前没有活跃 session 时才会真正熄屏。
+CoreS3 接入外部电源时屏幕亮度自动设为最大值 `255`，拔掉电源后恢复电池亮度 `96`。
 
 首次改动已有配置时会生成 `.core-s3-companion.backup` 备份。配置完成后需要重启正在
 运行的 Claude/Codex 会话。为了访问这些用户级配置，客户端不是 App Sandbox 应用。
@@ -156,7 +160,7 @@ Agent 状态消息由 8 字节基础头部、最多 60 字节 UTF-8 标题和可
 |---|---|---|
 | 0 | 协议版本 | `0x01` |
 | 1 | 消息类型 | `0x02`（Agent status） |
-| 2 | 状态 | `0=IDLE, 1=RUNNING, 2=AUTH, 3=REPLY, 4=DONE` |
+| 2 | 状态 | `0=IDLE, 1=RUNNING, 2=AUTH, 3=REPLY, 4=DONE, 5=CANCEL, 6=ERROR` |
 | 3 | 来源 | `0=Auto, 1=Claude, 2=Codex` |
 | 4 | 5H 剩余 | `0...100`，未知为 `0xFF` |
 | 5 | Weekly 剩余 | `0...100`，未知为 `0xFF` |

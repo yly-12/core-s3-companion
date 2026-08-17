@@ -154,11 +154,12 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
             let transcript = transcriptUsage[record.sessionID]
             var state = record.state
             var updatedAt = record.updatedAt
-            if let rejectedAt = transcript?.userRejectedAt,
-               rejectedAt > (record.updatedAt ?? .distantPast),
-               state == .waitingAuthorization || state == .waitingReply {
-                state = .waitingReply
-                updatedAt = rejectedAt
+            if let terminalState = transcript?.terminalState,
+               let terminalStateAt = transcript?.terminalStateAt,
+               state != .idle,
+               terminalStateAt.timeIntervalSince(record.updatedAt ?? .distantPast) >= -30 {
+                state = terminalState
+                updatedAt = max(updatedAt ?? .distantPast, terminalStateAt)
             }
             return AgentSnapshot(
                 sessionID: record.sessionID,
@@ -494,7 +495,7 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
         switch snapshot.state {
         case .idle:
             return false
-        case .completed:
+        case .completed, .cancelled, .failed:
             return age <= 30
         case .running, .waitingAuthorization, .waitingReply:
             return age <= 30 * 60
@@ -513,7 +514,7 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
         case .waitingAuthorization: 4
         case .waitingReply: 3
         case .running: 2
-        case .completed: 1
+        case .completed, .cancelled, .failed: 1
         case .idle: 0
         }
     }
@@ -671,7 +672,8 @@ struct ClaudeTranscriptUsage {
     var aiTitle: String?
     var modelName: String?
     var contextUsed: UInt8?
-    var userRejectedAt: Date?
+    var terminalState: AgentRunState?
+    var terminalStateAt: Date?
 }
 
 private struct ClaudeTranscriptCacheEntry {
@@ -689,7 +691,8 @@ enum ClaudeTranscriptReader {
         var aiTitle: String?
         var modelName: String?
         var contextUsed: UInt8?
-        var userRejectedAt: Date?
+        var terminalState: AgentRunState?
+        var terminalStateAt: Date?
         contents.enumerateLines { line, _ in
             guard let data = line.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -709,15 +712,40 @@ enum ClaudeTranscriptReader {
                object["toolUseResult"] as? String == "User rejected tool use",
                let timestamp = object["timestamp"] as? String,
                let date = iso8601Date(timestamp) {
-                userRejectedAt = date
+                terminalState = .cancelled
+                terminalStateAt = date
                 return
             }
 
-            guard object["type"] as? String == "assistant",
-                  let message = object["message"] as? [String: Any],
-                  let usage = message["usage"] as? [String: Any] else {
+            if object["type"] as? String == "user",
+               let timestamp = object["timestamp"] as? String,
+               let date = iso8601Date(timestamp),
+               isInterruptionMarker(messageText(object)) {
+                terminalState = .cancelled
+                terminalStateAt = date
                 return
             }
+
+            if object["type"] as? String == "user",
+               isHumanPrompt(object) {
+                terminalState = nil
+                terminalStateAt = nil
+            }
+
+            guard object["type"] as? String == "assistant",
+                  let message = object["message"] as? [String: Any] else {
+                return
+            }
+
+            if object["isApiErrorMessage"] as? Bool == true {
+                terminalState = .failed
+                terminalStateAt = (object["timestamp"] as? String).flatMap(iso8601Date)
+                return
+            }
+
+            terminalState = nil
+            terminalStateAt = nil
+            guard let usage = message["usage"] as? [String: Any] else { return }
 
             let contextTokens = number(usage["input_tokens"])
                 + number(usage["cache_creation_input_tokens"])
@@ -729,15 +757,45 @@ enum ClaudeTranscriptReader {
                 UInt8(max(0, min(100, (contextTokens / $0 * 100).rounded())))
             }
         }
-        guard aiTitle != nil || modelName != nil || contextUsed != nil || userRejectedAt != nil else {
+        guard aiTitle != nil || modelName != nil || contextUsed != nil || terminalState != nil else {
             return nil
         }
         return ClaudeTranscriptUsage(
             aiTitle: aiTitle,
             modelName: modelName,
             contextUsed: contextUsed,
-            userRejectedAt: userRejectedAt
+            terminalState: terminalState,
+            terminalStateAt: terminalStateAt
         )
+    }
+
+    private static func isHumanPrompt(_ object: [String: Any]) -> Bool {
+        guard let message = object["message"] as? [String: Any],
+              let content = message["content"] else { return false }
+        if content is String { return !isInterruptionMarker(messageText(object)) }
+        guard let blocks = content as? [[String: Any]],
+              !blocks.contains(where: { $0["type"] as? String == "tool_result" }) else {
+            return false
+        }
+        let text = messageText(object)
+        return !text.isEmpty && !isInterruptionMarker(text)
+    }
+
+    private static func messageText(_ object: [String: Any]) -> String {
+        guard let message = object["message"] as? [String: Any],
+              let content = message["content"] else { return "" }
+        if let text = content as? String { return text }
+        return (content as? [[String: Any]])?.compactMap { block -> String? in
+            guard block["type"] as? String == "text" else { return nil }
+            return block["text"] as? String
+        }.joined(separator: "\n") ?? ""
+    }
+
+    private static func isInterruptionMarker(_ value: String) -> Bool {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "[request interrupted by user]", "[request interrupted by user for tool use]": true
+        default: false
+        }
     }
 
     private static func iso8601Date(_ value: String) -> Date? {
@@ -796,6 +854,8 @@ private extension AgentRunState {
         case "waitingauthorization", "waiting_authorization": self = .waitingAuthorization
         case "waitingreply", "waiting_reply": self = .waitingReply
         case "completed": self = .completed
+        case "cancelled", "canceled": self = .cancelled
+        case "failed", "error": self = .failed
         default: return nil
         }
     }

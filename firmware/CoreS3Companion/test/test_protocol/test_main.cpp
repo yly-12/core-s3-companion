@@ -109,6 +109,19 @@ void testAgentStatusAcceptsUnknownMetrics() {
           frame, sizeof(frame), message)));
 }
 
+void testAgentStatusAcceptsCancelledAndFailedStates() {
+  for (const std::uint8_t state : {std::uint8_t{5}, std::uint8_t{6}}) {
+    const std::uint8_t frame[] = {0x01, 0x02, state, 0x01,
+                                  0xFF, 0xFF, 0xFF, 0x00};
+    companion::protocol::AgentStatusMessage message;
+    TEST_ASSERT_EQUAL_INT(
+        static_cast<int>(AgentParseResult::kOk),
+        static_cast<int>(companion::protocol::parseAgentStatus(
+            frame, sizeof(frame), message)));
+    TEST_ASSERT_EQUAL_UINT8(state, static_cast<std::uint8_t>(message.state));
+  }
+}
+
 void testAgentStatusAcceptsChineseUtf8Title() {
   const char* title = u8"修复蓝牙";
   const std::size_t titleLength = std::strlen(title);
@@ -145,7 +158,7 @@ void testAgentStatusRejectsInvalidLength() {
 }
 
 void testAgentStatusRejectsInvalidState() {
-  const std::uint8_t frame[] = {0x01, 0x02, 0x05, 0x01,
+  const std::uint8_t frame[] = {0x01, 0x02, 0x07, 0x01,
                                 50,   50,   50,   0x00};
   companion::protocol::AgentStatusMessage message;
   TEST_ASSERT_EQUAL_INT(
@@ -251,6 +264,9 @@ void testNeverSleepKeepsDisplayAwake() {
 
 void testPowerSourceSelectsDisplayTimeout() {
   companion::app::CompanionState state;
+  TEST_ASSERT_EQUAL_UINT8(
+      companion::app::CompanionState::kBatteryDisplayBrightness,
+      state.displayBrightness());
   companion::protocol::AgentStatusMessage message;
   message.displayTimeoutOnBatteryMinutes = 1;
   message.displayTimeoutOnExternalPowerMinutes = 0;
@@ -262,6 +278,9 @@ void testPowerSourceSelectsDisplayTimeout() {
   TEST_ASSERT_TRUE(state.isExternalPowerConnected());
   TEST_ASSERT_TRUE(state.isBatteryCharging());
   TEST_ASSERT_TRUE(state.isDisplayAwake());
+  TEST_ASSERT_EQUAL_UINT8(
+      companion::app::CompanionState::kExternalPowerDisplayBrightness,
+      state.displayBrightness());
 
   state.setPowerState(false, false, 62000);
   state.update(121999);
@@ -270,6 +289,9 @@ void testPowerSourceSelectsDisplayTimeout() {
   TEST_ASSERT_FALSE(state.isExternalPowerConnected());
   TEST_ASSERT_FALSE(state.isBatteryCharging());
   TEST_ASSERT_FALSE(state.isDisplayAwake());
+  TEST_ASSERT_EQUAL_UINT8(
+      companion::app::CompanionState::kBatteryDisplayBrightness,
+      state.displayBrightness());
 }
 
 void testActiveSessionsKeepDisplayAwake() {
@@ -325,6 +347,7 @@ int main(int, char**) {
   RUN_TEST(testParsesPowerAwareDisplaySettingsAndResetCountdowns);
   RUN_TEST(testAgentStatusRejectsInvalidDisplayTimeout);
   RUN_TEST(testAgentStatusAcceptsUnknownMetrics);
+  RUN_TEST(testAgentStatusAcceptsCancelledAndFailedStates);
   RUN_TEST(testAgentStatusAcceptsChineseUtf8Title);
   RUN_TEST(testAgentStatusRejectsInvalidUtf8Title);
   RUN_TEST(testAgentStatusRejectsInvalidLength);

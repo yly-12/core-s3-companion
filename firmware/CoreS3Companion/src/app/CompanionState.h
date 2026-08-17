@@ -10,6 +10,8 @@ namespace app {
 class CompanionState {
  public:
   static constexpr std::uint32_t kSampleTimeoutMs = 20000;
+  static constexpr std::uint8_t kBatteryDisplayBrightness = 96;
+  static constexpr std::uint8_t kExternalPowerDisplayBrightness = 255;
 
   void setConnected(bool connected);
   void setAgentStatus(const protocol::AgentStatusMessage& status,
@@ -28,6 +30,7 @@ class CompanionState {
   std::uint8_t batteryLevel() const;
   bool isExternalPowerConnected() const;
   bool isBatteryCharging() const;
+  std::uint8_t displayBrightness() const;
 
  private:
   bool connected_ = false;

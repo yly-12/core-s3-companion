@@ -64,6 +64,10 @@ const char* stateLabel(const protocol::AgentRunState state) {
       return "REPLY";
     case protocol::AgentRunState::kCompleted:
       return "DONE";
+    case protocol::AgentRunState::kCancelled:
+      return "CANCEL";
+    case protocol::AgentRunState::kFailed:
+      return "ERROR";
   }
   return "IDLE";
 }
@@ -80,6 +84,10 @@ std::uint16_t stateColor(const protocol::AgentRunState state) {
       return color(88, 166, 255);
     case protocol::AgentRunState::kCompleted:
       return color(167, 243, 208);
+    case protocol::AgentRunState::kCancelled:
+      return color(251, 146, 60);
+    case protocol::AgentRunState::kFailed:
+      return color(255, 92, 92);
   }
   return TFT_WHITE;
 }
@@ -159,11 +167,18 @@ void DisplayRenderer::begin() {
   config.internal_spk = false;
   M5.begin(config);
   M5.Display.setRotation(1);
-  M5.Display.setBrightness(96);
+  displayBrightness_ = app::CompanionState::kBatteryDisplayBrightness;
+  M5.Display.setBrightness(displayBrightness_);
   M5.Display.fillScreen(TFT_BLACK);
 }
 
 void DisplayRenderer::render(const app::CompanionState& state) {
+  const std::uint8_t desiredBrightness = state.displayBrightness();
+  if (displayBrightness_ != desiredBrightness) {
+    M5.Display.setBrightness(desiredBrightness);
+    displayBrightness_ = desiredBrightness;
+  }
+
   if (!state.isDisplayAwake()) {
     if (displayAwake_) {
       M5.Display.sleep();

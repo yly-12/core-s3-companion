@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240" role="img" aria-labelledby="title desc" shape-rendering="crispEdges">
+  <title id="title">Claude state — cancelled</title>
+  <desc id="desc">The user cancelled plan implementation.</desc>
+  <defs><style>.ui{font-family:Silkscreen,Monaco,monospace}.meta{font-size:11px;letter-spacing:.4px}.title{font-size:14px;font-weight:700}.state{font-size:36px;font-weight:700;letter-spacing:2px}.value{font-size:12px;font-weight:700}</style></defs>
+  <rect width="320" height="240" fill="#000000"/>
+  <text x="16" y="23" class="ui meta" fill="#7C8782">CLAUDE</text><text x="304" y="23" class="ui meta" text-anchor="end" fill="#F2F5F3">BAT 78%</text>
+  <path d="M16 34h288" stroke="#173128"/><text x="16" y="57" class="ui title" fill="#F2F5F3">BUILD MAC CLIENT</text>
+  <rect x="16" y="77" width="8" height="48" fill="#FB923C"/><text x="40" y="117" class="ui state" fill="#FB923C">CANCEL</text>
+  <path d="M16 144h288" stroke="#173128"/>
+  <g class="ui"><text x="16" y="168" class="value" fill="#F2F5F3">5H 46%</text><rect x="16" y="178" width="86" height="6" fill="#173128"/><rect x="16" y="178" width="40" height="6" fill="#46F59A"/><text x="16" y="201" class="meta" fill="#7C8782">0H48m</text><text x="117" y="168" class="value" fill="#F2F5F3">WK 36%</text><rect x="117" y="178" width="86" height="6" fill="#173128"/><rect x="117" y="178" width="31" height="6" fill="#46F59A"/><text x="117" y="201" class="meta" fill="#7C8782">18H32m</text><text x="218" y="168" class="value" fill="#F2F5F3">CTX 72%</text><rect x="218" y="178" width="86" height="6" fill="#173128"/><rect x="218" y="178" width="62" height="6" fill="#FFC857"/><text x="218" y="201" class="meta" fill="#7C8782">SESSION</text></g>
+  <text x="16" y="219" class="ui meta" fill="#F2F5F3">OPUS 4.7</text><text x="304" y="219" class="ui meta" text-anchor="end" fill="#7C8782">EFF XHIGH</text>
+</svg>

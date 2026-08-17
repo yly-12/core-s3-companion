@@ -23,6 +23,8 @@ enum class AgentRunState : std::uint8_t {
   kWaitingAuthorization = 2,
   kWaitingReply = 3,
   kCompleted = 4,
+  kCancelled = 5,
+  kFailed = 6,
 };
 
 enum class AgentSource : std::uint8_t {

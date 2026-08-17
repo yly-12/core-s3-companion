@@ -25,7 +25,7 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
 
     private let originalClaudeStatusLineKey = "_coreS3CompanionOriginalStatusLine"
     private let managedScriptNeedle = "core-s3-agent-hook.js"
-    private let managedAssetMarker = "core-s3-hook-schema-v7"
+    private let managedAssetMarker = "core-s3-hook-schema-v8"
 
     init(
         homeURL: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -372,7 +372,7 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
     }
 
     private static let jxaHookScript = #"""
-    // core-s3-hook-schema-v7
+    // core-s3-hook-schema-v8
     ObjC.import('Foundation');
 
     function readInput() {
@@ -530,7 +530,8 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
       }
       if (event === 'Notification' && notification.indexOf('permission') >= 0) state = 'waiting_authorization';
       if (event === 'Notification' && (notification.indexOf('idle') >= 0 || notification.indexOf('question') >= 0 || notification.indexOf('elicitation') >= 0 || notification.indexOf('away_summary') >= 0)) state = 'waiting_reply';
-      if (event === 'Stop' || event === 'StopFailure') state = 'completed';
+      if (event === 'Stop') state = 'completed';
+      if (event === 'StopFailure') state = 'failed';
 
       var suppliedTitle = firstLine(payload.session_name || payload.thread_name || payload.session_title);
       var title = suppliedTitle;

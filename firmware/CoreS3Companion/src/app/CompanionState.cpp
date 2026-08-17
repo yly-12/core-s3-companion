@@ -96,5 +96,10 @@ bool CompanionState::isExternalPowerConnected() const {
 
 bool CompanionState::isBatteryCharging() const { return batteryCharging_; }
 
+std::uint8_t CompanionState::displayBrightness() const {
+  return externalPowerConnected_ ? kExternalPowerDisplayBrightness
+                                 : kBatteryDisplayBrightness;
+}
+
 }  // namespace app
 }  // namespace companion

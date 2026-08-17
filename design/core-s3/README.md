@@ -22,6 +22,8 @@ Minimal Status 同时提供完整状态：
 - `05-state-authorization.svg`：`AUTH`，等待工具授权
 - `06-state-reply.svg`：`REPLY`，等待用户回复
 - `07-state-complete.svg`：`DONE`，任务已经完成
+- `08-state-cancelled.svg`：`CANCEL`，用户取消实施计划
+- `09-state-error.svg`：`ERROR`，Claude API 请求失败
 
 状态使用固定颜色，避免只依赖文案：
 
@@ -30,6 +32,8 @@ Minimal Status 同时提供完整状态：
 - `AUTH`：黄色 `#FFC857`
 - `REPLY`：蓝色 `#58A6FF`
 - `DONE`：浅绿色 `#A7F3D0`
+- `CANCEL`：橙色 `#FB923C`
+- `ERROR`：红色 `#FF5C5C`
 
 ## 信息缩写
 
@@ -47,7 +51,7 @@ Minimal Status 同时提供完整状态：
 位图字体，因此可以直接显示 UTF-8 中英文标题。底栏左侧显示当前 session 模型名称，
 右侧显示 effort；字段不可用时显示 `MODEL -- / EFF --`。
 
-状态区只保留 `IDLE / RUNNING / AUTH / REPLY / DONE` 一个主词，不再重复显示 `READY`、
+状态区只保留 `IDLE / RUNNING / AUTH / REPLY / DONE / CANCEL / ERROR` 一个主词，不再重复显示 `READY`、
 `WORKING` 等同义说明。Usage 区每列依次显示百分比、进度条和重置倒计时，倒计时不显示
 额外前缀。5H 使用 `2H14m` 格式；Weekly 在剩余时间大于等于 24 小时
 时使用 `3D8H` 格式，小于 24 小时时同样切换为 `xHym`。各数字不补前导 0。Context 第二行显示 `SESSION`。
@@ -70,6 +74,8 @@ Minimal Status 同时提供完整状态：
 - 等待授权：`#FFC857`
 - 等待回复：`#58A6FF`
 - 完成：`#A7F3D0`
+- 取消：`#FB923C`
+- 错误：`#FF5C5C`
 - 网格：`#173128`
 
 ## 触摸边界
