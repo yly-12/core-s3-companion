@@ -14,6 +14,7 @@ namespace renderer {
 namespace {
 
 constexpr std::int32_t kScreenWidth = 320;
+constexpr std::uint32_t kAttentionBlinkIntervalMs = 500;
 
 bool updateSignature(std::string& previous, const char* current) {
   if (previous == current) {
@@ -233,8 +234,14 @@ void DisplayRenderer::render(const app::CompanionState& state) {
   std::snprintf(signature, sizeof(signature), "%u|%s", hasFreshStatus, title);
   const bool titleDirty = updateSignature(titleSignature_, signature);
 
-  std::snprintf(signature, sizeof(signature), "%u|%u", hasFreshStatus,
-                static_cast<unsigned>(displayedState));
+  const bool isAttentionState =
+      displayedState == protocol::AgentRunState::kWaitingAuthorization ||
+      displayedState == protocol::AgentRunState::kWaitingReply;
+  const bool stateLabelVisible =
+      !isAttentionState ||
+      ((millis() / kAttentionBlinkIntervalMs) % 2U == 0U);
+  std::snprintf(signature, sizeof(signature), "%u|%u|%u", hasFreshStatus,
+                static_cast<unsigned>(displayedState), stateLabelVisible);
   const bool stateDirty = updateSignature(stateSignature_, signature);
 
   std::snprintf(
@@ -288,7 +295,9 @@ void DisplayRenderer::render(const app::CompanionState& state) {
     const std::uint16_t accent =
         hasFreshStatus ? stateColor(displayedState) : muted;
     M5.Display.fillRect(16, 76, 8, 50, accent);
-    drawText(stateLabel(displayedState), 40, 80, 5, accent);
+    if (stateLabelVisible) {
+      drawText(stateLabel(displayedState), 40, 80, 5, accent);
+    }
   }
 
   if (metricsDirty) {

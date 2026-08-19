@@ -427,6 +427,53 @@ struct AgentStatusMonitorTests {
         #expect(snapshot?.weeklyResetsAt == Date(timeIntervalSince1970: 2_000_300_000))
     }
 
+    @Test("Codex resumes running after a request-user-input response")
+    func codexReplyResponseResumesRunning() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("core-s3-codex-reply-\(UUID().uuidString)", isDirectory: true)
+        let states = root.appendingPathComponent("state", isDirectory: true)
+        let sessions = root.appendingPathComponent("sessions/2026/08/17", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: states, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+
+        let rollout = sessions.appendingPathComponent("rollout-reply.jsonl")
+        let lines = [
+            try rolloutRecord(outerType: "session_meta", payload: [
+                "id": "codex-reply-session",
+                "cwd": "/tmp/core-s3-companion",
+            ]),
+            try rolloutLine(type: "task_started", payload: [:]),
+            try rolloutRecord(outerType: "response_item", payload: [
+                "type": "function_call",
+                "name": "request_user_input",
+                "call_id": "call-question",
+            ]),
+            try rolloutRecord(outerType: "response_item", payload: [
+                "type": "function_call_output",
+                "call_id": "call-question",
+                "output": "{\"answer\":\"continue\"}",
+            ]),
+        ]
+        try lines.joined(separator: "\n").write(to: rollout, atomically: true, encoding: .utf8)
+
+        let monitor = AgentStatusMonitor(
+            stateDirectoryURL: states,
+            codexSessionsURL: root.appendingPathComponent("sessions"),
+            claudeSessionsURL: root.appendingPathComponent("no-claude-sessions"),
+            claudeProjectsURL: root.appendingPathComponent("no-claude-projects"),
+            claudeConfigurationURL: root.appendingPathComponent("no-claude-configuration"),
+            codexSessionIndexURL: root.appendingPathComponent("no-session-index.jsonl")
+        )
+        monitor.selectedSource = .codex
+        var snapshot: AgentSnapshot?
+        monitor.onSnapshots = { snapshot = $0.first }
+        monitor.refresh()
+
+        #expect(snapshot?.source == .codex)
+        #expect(snapshot?.state == .running)
+    }
+
     @Test("Returns multiple active sessions in alert priority order")
     func returnsMultipleActiveSessions() throws {
         let root = FileManager.default.temporaryDirectory

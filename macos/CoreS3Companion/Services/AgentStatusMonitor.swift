@@ -913,6 +913,7 @@ private enum CodexRolloutReader {
         var usage: AgentUsage?
         var contextWindow: Double?
         var turnCompleted = false
+        var pendingReplyCallIDs = Set<String>()
 
         contents.enumerateLines { line, _ in
             guard let data = line.data(using: .utf8),
@@ -982,6 +983,17 @@ private enum CodexRolloutReader {
                payload["type"] as? String == "function_call",
                payload["name"] as? String == "request_user_input" {
                 record.state = .waitingReply
+                turnCompleted = false
+                if let callID = string(payload["call_id"]) {
+                    pendingReplyCallIDs.insert(callID)
+                }
+            }
+
+            if outerType == "response_item",
+               payload["type"] as? String == "function_call_output",
+               let callID = string(payload["call_id"]),
+               pendingReplyCallIDs.remove(callID) != nil {
+                record.state = .running
                 turnCompleted = false
             }
 
