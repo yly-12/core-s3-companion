@@ -7,6 +7,7 @@
 #include <string>
 
 #include "protocol/AgentStatusMessage.h"
+#include "renderer/StatusAnimationAssets.h"
 
 namespace companion {
 namespace renderer {
@@ -15,6 +16,9 @@ namespace {
 
 constexpr std::int32_t kScreenWidth = 320;
 constexpr std::uint32_t kAttentionBlinkIntervalMs = 500;
+constexpr std::int32_t kAnimationX = 256;
+constexpr std::int32_t kAnimationY = 77;
+constexpr std::int32_t kAnimationSize = 48;
 
 bool updateSignature(std::string& previous, const char* current) {
   if (previous == current) {
@@ -244,6 +248,26 @@ void DisplayRenderer::render(const app::CompanionState& state) {
                 static_cast<unsigned>(displayedState), stateLabelVisible);
   const bool stateDirty = updateSignature(stateSignature_, signature);
 
+  const auto& animation = statusAnimationFor(displayedState);
+  const std::uint32_t nowMs = millis();
+  bool animationDirty = false;
+  if (!animationInitialized_ || animationState_ != displayedState) {
+    animationState_ = displayedState;
+    animationFrame_ = 0;
+    animationFrameStartedAtMs_ = nowMs;
+    animationInitialized_ = true;
+    animationDirty = true;
+  } else {
+    const std::uint32_t elapsedMs = nowMs - animationFrameStartedAtMs_;
+    if (elapsedMs >= animation.frameDelayMs) {
+      const std::uint32_t elapsedFrames = elapsedMs / animation.frameDelayMs;
+      animationFrame_ = static_cast<std::uint8_t>(
+          (animationFrame_ + elapsedFrames) % kStatusAnimationFrameCount);
+      animationFrameStartedAtMs_ += elapsedFrames * animation.frameDelayMs;
+      animationDirty = true;
+    }
+  }
+
   std::snprintf(
       signature, sizeof(signature), "%u|%u|%u|%u|%u|%u|%u",
       hasFreshStatus, static_cast<unsigned>(displayedSource),
@@ -255,8 +279,8 @@ void DisplayRenderer::render(const app::CompanionState& state) {
                 modelName, effortValue);
   const bool footerDirty = updateSignature(footerSignature_, signature);
 
-  if (!headerDirty && !titleDirty && !stateDirty && !metricsDirty &&
-      !footerDirty) {
+  if (!headerDirty && !titleDirty && !stateDirty && !animationDirty &&
+      !metricsDirty && !footerDirty) {
     return;
   }
 
@@ -291,13 +315,21 @@ void DisplayRenderer::render(const app::CompanionState& state) {
   }
 
   if (stateDirty) {
-    M5.Display.fillRect(0, 76, kScreenWidth, 68, TFT_BLACK);
+    M5.Display.fillRect(0, 76, kAnimationX, 68, TFT_BLACK);
     const std::uint16_t accent =
         hasFreshStatus ? stateColor(displayedState) : muted;
     M5.Display.fillRect(16, 76, 8, 50, accent);
     if (stateLabelVisible) {
       drawText(stateLabel(displayedState), 40, 80, 5, accent);
     }
+  }
+
+  if (animationDirty) {
+    M5.Display.fillRect(kAnimationX, 76, kScreenWidth - kAnimationX, 68,
+                        TFT_BLACK);
+    const auto& frame = animation.frames[animationFrame_];
+    M5.Display.drawPng(frame.data, frame.size, kAnimationX, kAnimationY,
+                       kAnimationSize, kAnimationSize);
   }
 
   if (metricsDirty) {
@@ -338,6 +370,7 @@ void DisplayRenderer::clearSignatures() {
   stateSignature_.clear();
   metricsSignature_.clear();
   footerSignature_.clear();
+  animationInitialized_ = false;
 }
 
 }  // namespace renderer
