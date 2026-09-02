@@ -427,6 +427,59 @@ struct AgentStatusMonitorTests {
         #expect(snapshot?.weeklyResetsAt == Date(timeIntervalSince1970: 2_000_300_000))
     }
 
+    @Test("Incrementally parses lines appended to a Codex rollout")
+    func incrementallyParsesCodexRolloutAppend() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("core-s3-codex-append-\(UUID().uuidString)", isDirectory: true)
+        let states = root.appendingPathComponent("state", isDirectory: true)
+        let sessions = root.appendingPathComponent("sessions/2026/09/02", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: states, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+
+        let rollout = sessions.appendingPathComponent("rollout-append.jsonl")
+        let initialLines = [
+            try rolloutRecord(outerType: "session_meta", payload: [
+                "id": "codex-append-session",
+                "cwd": "/tmp/core-s3-companion",
+            ]),
+            try rolloutLine(type: "task_started", payload: [:]),
+        ]
+        try initialLines.joined(separator: "\n").write(
+            to: rollout,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        var now = Date()
+        let monitor = AgentStatusMonitor(
+            stateDirectoryURL: states,
+            codexSessionsURL: root.appendingPathComponent("sessions"),
+            claudeSessionsURL: root.appendingPathComponent("no-claude-sessions"),
+            claudeProjectsURL: root.appendingPathComponent("no-claude-projects"),
+            claudeConfigurationURL: root.appendingPathComponent("no-claude-configuration"),
+            codexSessionIndexURL: root.appendingPathComponent("no-session-index.jsonl"),
+            currentDate: { now }
+        )
+        monitor.selectedSource = .codex
+        var snapshot: AgentSnapshot?
+        monitor.onSnapshots = { snapshot = $0.first }
+        monitor.refresh()
+        #expect(snapshot?.state == .running)
+
+        let handle = try FileHandle(forWritingTo: rollout)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(
+            ("\n" + (try rolloutLine(type: "task_complete", payload: [:]))).utf8
+        ))
+        try handle.close()
+        now.addTimeInterval(4)
+        monitor.refresh()
+
+        #expect(snapshot?.sessionID == "codex-append-session")
+        #expect(snapshot?.state == .completed)
+    }
+
     @Test("Codex resumes running after a request-user-input response")
     func codexReplyResponseResumesRunning() throws {
         let root = FileManager.default.temporaryDirectory

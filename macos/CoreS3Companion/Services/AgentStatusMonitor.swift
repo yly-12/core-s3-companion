@@ -11,6 +11,7 @@ protocol AgentStatusMonitoring: AnyObject {
 
 final class AgentStatusMonitor: AgentStatusMonitoring {
     private static let claudeUsageRefreshInterval: TimeInterval = 5 * 60
+    private static let claudeTranscriptIndexRefreshInterval: TimeInterval = 10
 
     var onSnapshots: (([AgentSnapshot]) -> Void)?
     var selectedSource: AgentSource = .automatic
@@ -29,7 +30,11 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
     private var codexRolloutCache: [URL: CodexRolloutReader.CacheEntry] = [:]
     private var cachedCodexRollouts: [CodexRolloutReader.Snapshot] = []
     private var lastCodexScanAt = Date.distantPast
+    private var claudeHookRecordCache: [URL: HookRecordCacheEntry] = [:]
+    private var codexHookRecordCache: [URL: HookRecordCacheEntry] = [:]
     private var claudeTranscriptCache: [URL: ClaudeTranscriptCacheEntry] = [:]
+    private var claudeTranscriptURLsBySessionID: [String: URL] = [:]
+    private var lastClaudeTranscriptIndexScanAt = Date.distantPast
     private var lastClaudeUsageRefreshAttemptAt = Date.distantPast
     private var claudeUsageRefreshInFlight = false
     private var refreshedClaudeUsage: AgentUsage?
@@ -75,8 +80,10 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
         refresh()
         refreshClaudeUsageIfNeeded(force: true)
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            self?.refresh()
-            self?.refreshClaudeUsageIfNeeded()
+            autoreleasepool {
+                self?.refresh()
+                self?.refreshClaudeUsageIfNeeded()
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
@@ -88,6 +95,12 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
     }
 
     func refresh() {
+        autoreleasepool {
+            performRefresh()
+        }
+    }
+
+    private func performRefresh() {
         let claudeUsage = loadClaudeUsage()
         let claudeRecords = loadHookRecords(for: .claude)
         let claudeTranscriptUsage = loadClaudeTranscriptUsage(
@@ -294,29 +307,73 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
         let legacyURL = stateDirectoryURL.appendingPathComponent("\(source.rawValue)-state.json")
         if fileManager.fileExists(atPath: legacyURL.path) { urls.append(legacyURL) }
 
+        var cache: [URL: HookRecordCacheEntry]
+        switch source {
+        case .claude:
+            cache = claudeHookRecordCache
+        case .codex:
+            cache = codexHookRecordCache
+        case .automatic:
+            return []
+        }
+
+        let retainedURLs = Set(urls)
+        cache = cache.filter { retainedURLs.contains($0.key) }
         var recordsByID: [String: StatusRecord] = [:]
         for url in urls {
-            guard let data = try? Data(contentsOf: url),
-                  let payload = try? JSONDecoder().decode(HookStatePayload.self, from: data),
-                  let state = AgentRunState(hookValue: payload.state) else {
+            guard let values = try? url.resourceValues(
+                forKeys: [.contentModificationDateKey, .fileSizeKey]
+            ) else {
                 continue
             }
-            let fallbackID = url.deletingPathExtension().lastPathComponent
-            let record = StatusRecord(
-                sessionID: nonEmpty(payload.sessionID) ?? fallbackID,
-                source: source,
-                state: state,
-                title: payload.title ?? "",
-                modelName: payload.modelName,
-                effort: payload.effort,
-                contextUsed: percentage(payload.contextUsed),
-                updatedAt: payload.updatedAt.map(Date.init(timeIntervalSince1970:))
-            )
+            let modifiedAt = values.contentModificationDate ?? .distantPast
+            let fileSize = values.fileSize ?? 0
+            let record: StatusRecord
+            if let cached = cache[url],
+               cached.modifiedAt == modifiedAt,
+               cached.fileSize == fileSize {
+                guard let cachedRecord = cached.record else { continue }
+                record = cachedRecord
+            } else {
+                let decodedRecord: StatusRecord?
+                if let data = try? Data(contentsOf: url),
+                   let payload = try? JSONDecoder().decode(HookStatePayload.self, from: data),
+                   let state = AgentRunState(hookValue: payload.state) {
+                    let fallbackID = url.deletingPathExtension().lastPathComponent
+                    decodedRecord = StatusRecord(
+                        sessionID: nonEmpty(payload.sessionID) ?? fallbackID,
+                        source: source,
+                        state: state,
+                        title: payload.title ?? "",
+                        modelName: payload.modelName,
+                        effort: payload.effort,
+                        contextUsed: percentage(payload.contextUsed),
+                        updatedAt: payload.updatedAt.map(Date.init(timeIntervalSince1970:))
+                    )
+                } else {
+                    decodedRecord = nil
+                }
+                cache[url] = HookRecordCacheEntry(
+                    modifiedAt: modifiedAt,
+                    fileSize: fileSize,
+                    record: decodedRecord
+                )
+                guard let decodedRecord else { continue }
+                record = decodedRecord
+            }
             if let existing = recordsByID[record.sessionID],
                (existing.updatedAt ?? .distantPast) >= (record.updatedAt ?? .distantPast) {
                 continue
             }
             recordsByID[record.sessionID] = record
+        }
+        switch source {
+        case .claude:
+            claudeHookRecordCache = cache
+        case .codex:
+            codexHookRecordCache = cache
+        case .automatic:
+            break
         }
         return Array(recordsByID.values)
     }
@@ -431,22 +488,18 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
     private func loadClaudeTranscriptUsage(
         for sessionIDs: Set<String>
     ) -> [String: ClaudeTranscriptUsage] {
-        guard !sessionIDs.isEmpty,
-              let enumerator = fileManager.enumerator(
-                  at: claudeProjectsURL,
-                  includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
-                  options: [.skipsHiddenFiles, .skipsPackageDescendants]
-              ) else {
+        guard !sessionIDs.isEmpty else {
             return [:]
         }
 
+        refreshClaudeTranscriptIndexIfNeeded()
+
         var result: [String: ClaudeTranscriptUsage] = [:]
-        for case let url as URL in enumerator where url.pathExtension == "jsonl" {
-            let sessionID = url.deletingPathExtension().lastPathComponent
-            guard sessionIDs.contains(sessionID),
-                  let values = try? url.resourceValues(
-                      forKeys: [.contentModificationDateKey, .fileSizeKey]
-                  ) else {
+        for sessionID in sessionIDs {
+            guard let url = claudeTranscriptURLsBySessionID[sessionID],
+                  let values = try? url.resourceValues(forKeys: [
+                      .contentModificationDateKey, .fileSizeKey,
+                  ]) else {
                 continue
             }
             let modifiedAt = values.contentModificationDate ?? .distantPast
@@ -471,8 +524,33 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
         return result
     }
 
+    private func refreshClaudeTranscriptIndexIfNeeded() {
+        let now = currentDate()
+        guard now.timeIntervalSince(lastClaudeTranscriptIndexScanAt) >=
+            Self.claudeTranscriptIndexRefreshInterval else {
+            return
+        }
+        lastClaudeTranscriptIndexScanAt = now
+        guard let enumerator = fileManager.enumerator(
+            at: claudeProjectsURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            claudeTranscriptURLsBySessionID = [:]
+            return
+        }
+
+        var index: [String: URL] = [:]
+        for case let url as URL in enumerator where url.pathExtension == "jsonl" {
+            index[url.deletingPathExtension().lastPathComponent] = url
+        }
+        claudeTranscriptURLsBySessionID = index
+        let retainedURLs = Set(index.values)
+        claudeTranscriptCache = claudeTranscriptCache.filter { retainedURLs.contains($0.key) }
+    }
+
     private func loadCodexRollouts() -> [CodexRolloutReader.Snapshot] {
-        let now = Date()
+        let now = currentDate()
         guard now.timeIntervalSince(lastCodexScanAt) >= 3 else {
             return cachedCodexRollouts
         }
@@ -491,7 +569,7 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
     }
 
     private func isActive(_ snapshot: AgentSnapshot) -> Bool {
-        let age = Date().timeIntervalSince(snapshot.updatedAt ?? .distantPast)
+        let age = currentDate().timeIntervalSince(snapshot.updatedAt ?? .distantPast)
         switch snapshot.state {
         case .idle:
             return false
@@ -615,9 +693,7 @@ private struct ClaudeCachedWindow: Decodable {
                 if let numeric = Double(value) {
                     return Date(timeIntervalSince1970: numeric > 10_000_000_000 ? numeric / 1_000 : numeric)
                 }
-                let fractional = ISO8601DateFormatter()
-                fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                if let date = fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value) {
+                if let date = ISO8601DateParser.date(from: value) {
                     return date
                 }
             }
@@ -657,6 +733,12 @@ private struct StatusRecord {
     var effort: String? = nil
     var contextUsed: UInt8?
     var updatedAt: Date?
+}
+
+private struct HookRecordCacheEntry {
+    var modifiedAt: Date
+    var fileSize: Int
+    var record: StatusRecord?
 }
 
 private struct AgentUsage {
@@ -711,7 +793,7 @@ enum ClaudeTranscriptReader {
             if object["type"] as? String == "user",
                object["toolUseResult"] as? String == "User rejected tool use",
                let timestamp = object["timestamp"] as? String,
-               let date = iso8601Date(timestamp) {
+               let date = ISO8601DateParser.date(from: timestamp) {
                 terminalState = .cancelled
                 terminalStateAt = date
                 return
@@ -719,7 +801,7 @@ enum ClaudeTranscriptReader {
 
             if object["type"] as? String == "user",
                let timestamp = object["timestamp"] as? String,
-               let date = iso8601Date(timestamp),
+               let date = ISO8601DateParser.date(from: timestamp),
                isInterruptionMarker(messageText(object)) {
                 terminalState = .cancelled
                 terminalStateAt = date
@@ -739,7 +821,7 @@ enum ClaudeTranscriptReader {
 
             if object["isApiErrorMessage"] as? Bool == true {
                 terminalState = .failed
-                terminalStateAt = (object["timestamp"] as? String).flatMap(iso8601Date)
+                terminalStateAt = (object["timestamp"] as? String).flatMap(ISO8601DateParser.date)
                 return
             }
 
@@ -798,14 +880,24 @@ enum ClaudeTranscriptReader {
         }
     }
 
-    private static func iso8601Date(_ value: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
-    }
-
     private static func number(_ value: Any?) -> Double {
         (value as? NSNumber)?.doubleValue ?? 0
+    }
+}
+
+enum ISO8601DateParser {
+    private static let lock = NSLock()
+    private static let fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private static let standard = ISO8601DateFormatter()
+
+    static func date(from value: String) -> Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        return fractional.date(from: value) ?? standard.date(from: value)
     }
 }
 
@@ -867,9 +959,23 @@ private enum CodexRolloutReader {
         var usage: AgentUsage?
     }
 
+    struct ParserState {
+        var record: StatusRecord
+        var usage: AgentUsage?
+        var contextWindow: Double?
+        var turnCompleted: Bool
+        var pendingReplyCallIDs: Set<String>
+        var trailingData: Data
+    }
+
     struct CacheEntry {
         var modifiedAt: Date
-        var snapshot: Snapshot
+        var fileSize: Int
+        var state: ParserState
+
+        var snapshot: Snapshot {
+            Snapshot(record: state.record, usage: state.usage)
+        }
     }
 
     static func loadRecent(
@@ -884,144 +990,207 @@ private enum CodexRolloutReader {
         let retainedURLs = Set(candidates.map(\.url))
         cache = cache.filter { retainedURLs.contains($0.key) }
         return candidates.compactMap { candidate in
-            if let cached = cache[candidate.url], cached.modifiedAt == candidate.modifiedAt {
+            if let cached = cache[candidate.url],
+               cached.modifiedAt == candidate.modifiedAt,
+               cached.fileSize == candidate.fileSize {
                 return cached.snapshot
             }
-            guard let snapshot = load(from: candidate.url, modifiedAt: candidate.modifiedAt) else {
+
+            let entry: CacheEntry?
+            if var cached = cache[candidate.url], candidate.fileSize > cached.fileSize,
+               let appendedData = read(
+                   from: candidate.url,
+                   offset: UInt64(cached.fileSize)
+               ) {
+                cached.modifiedAt = candidate.modifiedAt
+                cached.fileSize = candidate.fileSize
+                process(appendedData, state: &cached.state)
+                entry = cached
+            } else {
+                entry = load(
+                    from: candidate.url,
+                    modifiedAt: candidate.modifiedAt,
+                    fileSize: candidate.fileSize
+                )
+            }
+            guard let entry else {
                 return nil
             }
-            cache[candidate.url] = CacheEntry(modifiedAt: candidate.modifiedAt, snapshot: snapshot)
-            return snapshot
+            cache[candidate.url] = entry
+            return entry.snapshot
         }
     }
 
-    private static func load(from fileURL: URL, modifiedAt: Date) -> Snapshot? {
-        guard let contents = try? String(contentsOf: fileURL, encoding: .utf8) else {
+    private static func load(
+        from fileURL: URL,
+        modifiedAt: Date,
+        fileSize: Int
+    ) -> CacheEntry? {
+        guard let data = try? Data(contentsOf: fileURL) else {
             return nil
         }
 
-        var record = StatusRecord(
-            sessionID: fileURL.deletingPathExtension().lastPathComponent,
-            source: .codex,
-            state: .idle,
-            title: fileURL.deletingLastPathComponent().lastPathComponent,
-            modelName: nil,
-            effort: nil,
-            contextUsed: nil,
-            updatedAt: modifiedAt
+        var state = ParserState(
+            record: StatusRecord(
+                sessionID: fileURL.deletingPathExtension().lastPathComponent,
+                source: .codex,
+                state: .idle,
+                title: fileURL.deletingLastPathComponent().lastPathComponent,
+                modelName: nil,
+                effort: nil,
+                contextUsed: nil,
+                updatedAt: modifiedAt
+            ),
+            usage: nil,
+            contextWindow: nil,
+            turnCompleted: false,
+            pendingReplyCallIDs: [],
+            trailingData: Data()
         )
-        var usage: AgentUsage?
-        var contextWindow: Double?
-        var turnCompleted = false
-        var pendingReplyCallIDs = Set<String>()
+        process(data, state: &state)
+        return CacheEntry(modifiedAt: modifiedAt, fileSize: fileSize, state: state)
+    }
 
-        contents.enumerateLines { line, _ in
-            guard let data = line.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return
-            }
-            let timestamp = date(from: object["timestamp"])
-            let outerType = object["type"] as? String
-            let payload = object["payload"] as? [String: Any] ?? [:]
+    private static func read(from fileURL: URL, offset: UInt64) -> Data? {
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return nil }
+        defer { try? handle.close() }
+        do {
+            try handle.seek(toOffset: offset)
+            return try handle.readToEnd() ?? Data()
+        } catch {
+            return nil
+        }
+    }
 
-            if outerType == "session_meta" {
-                record.sessionID = string(payload["id"])
-                    ?? string(payload["session_id"])
-                    ?? record.sessionID
-                if let cwd = payload["cwd"] as? String {
-                    record.title = URL(fileURLWithPath: cwd).lastPathComponent
-                }
-                contextWindow = number(payload["context_window"])
-                    ?? number(payload["model_context_window"])
-                    ?? contextWindow
-            }
-
-            if outerType == "turn_context" {
-                record.modelName = string(payload["model"])
-                    ?? string((payload["thread_settings"] as? [String: Any])?["model"])
-                    ?? record.modelName
-                record.effort = string(payload["effort"])
-                    ?? string(payload["reasoning_effort"])
-                    ?? string((payload["thread_settings"] as? [String: Any])?["reasoning_effort"])
-                    ?? record.effort
-            }
-
-            if outerType == "event_msg", let type = payload["type"] as? String {
-                switch type {
-                case "user_message":
-                    record.state = .running
-                    turnCompleted = false
-                case "task_started":
-                    record.state = .running
-                    turnCompleted = false
-                case "task_complete", "turn_complete", "turn_aborted":
-                    record.state = .completed
-                    turnCompleted = true
-                case "request_user_input", "elicitation_request":
-                    record.state = .waitingReply
-                    turnCompleted = false
-                case "exec_approval_request", "apply_patch_approval_request", "request_permissions":
-                    record.state = .waitingAuthorization
-                    turnCompleted = false
-                case "agent_reasoning", "exec_command_begin", "patch_apply_begin", "mcp_tool_call_begin",
-                     "web_search_begin", "image_generation_begin", "plan_update":
-                    if !turnCompleted { record.state = .running }
-                case "token_count":
-                    usage = parseUsage(
-                        payload,
-                        contextWindow: contextWindow,
-                        timestamp: timestamp,
-                        previous: usage
-                    )
-                    record.contextUsed = usage?.contextUsed ?? record.contextUsed
-                default:
-                    break
-                }
-            }
-
-            if outerType == "response_item",
-               payload["type"] as? String == "function_call",
-               payload["name"] as? String == "request_user_input" {
-                record.state = .waitingReply
-                turnCompleted = false
-                if let callID = string(payload["call_id"]) {
-                    pendingReplyCallIDs.insert(callID)
-                }
-            }
-
-            if outerType == "response_item",
-               payload["type"] as? String == "function_call_output",
-               let callID = string(payload["call_id"]),
-               pendingReplyCallIDs.remove(callID) != nil {
-                record.state = .running
-                turnCompleted = false
-            }
-
-            if let timestamp { record.updatedAt = timestamp }
+    private static func process(_ appendedData: Data, state: inout ParserState) {
+        var buffer = state.trailingData
+        buffer.append(appendedData)
+        var lineStart = buffer.startIndex
+        while lineStart < buffer.endIndex,
+              let newline = buffer[lineStart...].firstIndex(of: 0x0A) {
+            let line = Data(buffer[lineStart..<newline])
+            _ = parse(line, state: &state)
+            lineStart = buffer.index(after: newline)
         }
 
-        return Snapshot(record: record, usage: usage)
+        var trailing = Data(buffer[lineStart...])
+        if !trailing.isEmpty, parse(trailing, state: &state) {
+            trailing.removeAll(keepingCapacity: false)
+        }
+        state.trailingData = trailing
+    }
+
+    @discardableResult
+    private static func parse(_ data: Data, state: inout ParserState) -> Bool {
+        guard !data.isEmpty,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        let timestamp = date(from: object["timestamp"])
+        let outerType = object["type"] as? String
+        let payload = object["payload"] as? [String: Any] ?? [:]
+
+        if outerType == "session_meta" {
+            state.record.sessionID = string(payload["id"])
+                ?? string(payload["session_id"])
+                ?? state.record.sessionID
+            if let cwd = payload["cwd"] as? String {
+                state.record.title = URL(fileURLWithPath: cwd).lastPathComponent
+            }
+            state.contextWindow = number(payload["context_window"])
+                ?? number(payload["model_context_window"])
+                ?? state.contextWindow
+        }
+
+        if outerType == "turn_context" {
+            state.record.modelName = string(payload["model"])
+                ?? string((payload["thread_settings"] as? [String: Any])?["model"])
+                ?? state.record.modelName
+            state.record.effort = string(payload["effort"])
+                ?? string(payload["reasoning_effort"])
+                ?? string((payload["thread_settings"] as? [String: Any])?["reasoning_effort"])
+                ?? state.record.effort
+        }
+
+        if outerType == "event_msg", let type = payload["type"] as? String {
+            switch type {
+            case "user_message", "task_started":
+                state.record.state = .running
+                state.turnCompleted = false
+            case "task_complete", "turn_complete", "turn_aborted":
+                state.record.state = .completed
+                state.turnCompleted = true
+            case "request_user_input", "elicitation_request":
+                state.record.state = .waitingReply
+                state.turnCompleted = false
+            case "exec_approval_request", "apply_patch_approval_request", "request_permissions":
+                state.record.state = .waitingAuthorization
+                state.turnCompleted = false
+            case "agent_reasoning", "exec_command_begin", "patch_apply_begin", "mcp_tool_call_begin",
+                 "web_search_begin", "image_generation_begin", "plan_update":
+                if !state.turnCompleted { state.record.state = .running }
+            case "token_count":
+                state.usage = parseUsage(
+                    payload,
+                    contextWindow: state.contextWindow,
+                    timestamp: timestamp,
+                    previous: state.usage
+                )
+                state.record.contextUsed = state.usage?.contextUsed ?? state.record.contextUsed
+            default:
+                break
+            }
+        }
+
+        if outerType == "response_item",
+           payload["type"] as? String == "function_call",
+           payload["name"] as? String == "request_user_input" {
+            state.record.state = .waitingReply
+            state.turnCompleted = false
+            if let callID = string(payload["call_id"]) {
+                state.pendingReplyCallIDs.insert(callID)
+            }
+        }
+
+        if outerType == "response_item",
+           payload["type"] as? String == "function_call_output",
+           let callID = string(payload["call_id"]),
+           state.pendingReplyCallIDs.remove(callID) != nil {
+            state.record.state = .running
+            state.turnCompleted = false
+        }
+
+        if let timestamp { state.record.updatedAt = timestamp }
+        return true
     }
 
     private static func recentRolloutURLs(
         from rootURL: URL,
         fileManager: FileManager
-    ) -> [(url: URL, modifiedAt: Date)] {
+    ) -> [(url: URL, modifiedAt: Date, fileSize: Int)] {
         guard fileManager.fileExists(atPath: rootURL.path),
               let enumerator = fileManager.enumerator(
                 at: rootURL,
-                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                includingPropertiesForKeys: [
+                    .contentModificationDateKey, .fileSizeKey, .isRegularFileKey,
+                ],
                 options: [.skipsHiddenFiles]
               ) else {
             return []
         }
 
-        var candidates: [(URL, Date)] = []
+        var candidates: [(URL, Date, Int)] = []
         for case let url as URL in enumerator
         where url.lastPathComponent.hasPrefix("rollout-") && url.pathExtension == "jsonl" {
-            guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
+            guard let values = try? url.resourceValues(forKeys: [
+                .contentModificationDateKey, .fileSizeKey, .isRegularFileKey,
+            ]),
                   values.isRegularFile == true else { continue }
-            candidates.append((url, values.contentModificationDate ?? .distantPast))
+            candidates.append((
+                url,
+                values.contentModificationDate ?? .distantPast,
+                values.fileSize ?? 0
+            ))
         }
         return candidates.sorted { $0.1 > $1.1 }
     }
@@ -1124,9 +1293,7 @@ private enum CodexRolloutReader {
 
     private static func date(from value: Any?) -> Date? {
         guard let value = value as? String else { return nil }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+        return ISO8601DateParser.date(from: value)
     }
 
 }
