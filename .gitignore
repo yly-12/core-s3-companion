@@ -5,3 +5,4 @@ DerivedData/
 xcuserdata/
 *.xcresult
 __pycache__/
+node_modules/

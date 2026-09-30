@@ -236,16 +236,17 @@ Apple 公证；应用为读取 Claude/Codex 用户配置而不启用 App Sandbox
 ### 创建 Release
 
 仓库根目录的 `Version.xcconfig` 是版本号的唯一来源，Xcode 本地构建和 GitHub Release
-都会读取其中的 `MARKETING_VERSION`。发布新版本时先修改该文件，然后用以下命令创建
-并推送匹配的语义化版本标签：
+都会读取其中的 `MARKETING_VERSION`。使用仓库根目录的交互式脚本选择 major、minor 或
+patch；脚本会检查工作区、更新版本号、创建 release commit 和 annotated tag，但不会 push：
 
 ```bash
-version="$(awk -F= '/^[[:space:]]*MARKETING_VERSION[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}' Version.xcconfig)"
-git tag "v${version}"
-git push origin "v${version}"
+pnpm bump
 ```
 
-如果标签与 `Version.xcconfig` 不一致，Release 工作流会立即失败。
+完成后脚本会打印对应的 `git push origin <branch> v<版本号>` 命令，由发布者检查 commit
+和 tag 后手动执行。推送 tag 会触发 Release Action；如果标签与 `Version.xcconfig`
+不一致，工作流会立即失败。也可使用 `pnpm bump patch --dry-run` 预览结果，或通过
+`pnpm bump minor --yes` 显式选择级别并跳过二次确认。
 
 Release 流程成功后会生成：
 

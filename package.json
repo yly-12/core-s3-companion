@@ -1,0 +1,10 @@
+{
+  "name": "core-s3-companion",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "bump": "node scripts/bump.mjs"
+  }
+}
