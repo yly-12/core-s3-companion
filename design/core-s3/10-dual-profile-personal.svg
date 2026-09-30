@@ -14,9 +14,8 @@
   <rect width="320" height="240" fill="#000000"/>
 
   <text x="16" y="23" class="ui meta" fill="#10A37F">CODEX</text>
-  <rect x="63" y="7" width="66" height="20" rx="2" fill="#0A1824" stroke="#58A6FF"/>
-  <text x="96" y="21" class="ui badge" text-anchor="middle" fill="#58A6FF">PERSONAL</text>
-  <text x="238" y="23" class="ui badge" text-anchor="end" fill="#7C8782">ACTIVE 1/2</text>
+  <rect x="127" y="7" width="66" height="20" rx="2" fill="#0A1824" stroke="#58A6FF"/>
+  <text x="160" y="21" class="ui badge" text-anchor="middle" fill="#58A6FF">PERSONAL</text>
   <text x="304" y="23" class="ui meta" text-anchor="end" fill="#46F59A" aria-label="Battery 83 percent, charging">BAT 83%</text>
   <path d="M16 34h288" stroke="#173128"/>
 

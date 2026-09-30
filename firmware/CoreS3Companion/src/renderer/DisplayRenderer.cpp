@@ -16,6 +16,9 @@ namespace {
 
 constexpr std::int32_t kScreenWidth = 320;
 constexpr std::uint32_t kAttentionBlinkIntervalMs = 500;
+constexpr std::int32_t kProfileBadgeX = 133;
+constexpr std::int32_t kProfileBadgeCenterX = 160;
+constexpr std::int32_t kProfileBadgeWidth = 54;
 constexpr std::int32_t kAnimationX = 256;
 constexpr std::int32_t kAnimationY = 77;
 constexpr std::int32_t kAnimationSize = 48;
@@ -254,11 +257,10 @@ void DisplayRenderer::render(const app::CompanionState& state) {
 
   char signature[256];
   std::snprintf(
-      signature, sizeof(signature), "%u|%u|%u|%u|%u|%u|%u",
+      signature, sizeof(signature), "%u|%u|%u|%u|%u",
       static_cast<unsigned>(displayedSource), state.batteryLevel(),
       state.isBatteryCharging(), hasFreshStatus,
-      static_cast<unsigned>(status.codexProfile), status.activeIndex,
-      status.activeCount);
+      static_cast<unsigned>(status.codexProfile));
   const bool headerDirty = updateSignature(headerSignature_, signature);
 
   std::snprintf(signature, sizeof(signature), "%u|%s", hasFreshStatus, title);
@@ -325,15 +327,10 @@ void DisplayRenderer::render(const app::CompanionState& state) {
     if (hasFreshStatus &&
         status.codexProfile != protocol::CodexProfile::kNone) {
       const std::uint16_t badgeColor = profileColor(status.codexProfile);
-      M5.Display.drawRect(63, 7, 66, 20, badgeColor);
-      drawText(profileLabel(status.codexProfile), 96, 17, 1, badgeColor,
-               middle_center);
-    }
-    if (hasFreshStatus && status.activeCount > 1) {
-      char active[16];
-      std::snprintf(active, sizeof(active), "ACTIVE %u/%u",
-                    status.activeIndex, status.activeCount);
-      drawText(active, 238, 14, 1, muted, top_right);
+      M5.Display.drawRect(kProfileBadgeX, 7, kProfileBadgeWidth, 20,
+                         badgeColor);
+      drawText(profileLabel(status.codexProfile), kProfileBadgeCenterX, 17, 1,
+               badgeColor, middle_center);
     }
     char battery[12];
     if (state.batteryLevel() == protocol::kUnknownMetricValue) {

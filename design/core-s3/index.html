@@ -22,7 +22,7 @@
 <body>
   <main>
     <h1>CoreS3 / Agent Status UI</h1>
-    <p class="intro">所有设备画面均为原生 <code>320 × 240</code> SVG。Minimal Status 的状态词与对应 <code>48 × 48</code> 动画同处一行，动画右对齐；SVG 使用首帧预览，设备端循环播放。Usage 依次显示百分比、进度条和重置倒计时，5H 使用 <code>xHym</code>，Weekly 使用 <code>xDyH</code> 并在不足 24 小时时切换为 <code>xHym</code>，各数字不补前导 0。Context 标记为 <code>SESSION</code>，充电时电量文字变为绿色。双 Codex 账号同时工作时沿用主界面轮换，账号标签与 <code>ACTIVE x/y</code> 同步变化；当前版本不包含总览页或触摸事件。</p>
+    <p class="intro">所有设备画面均为原生 <code>320 × 240</code> SVG。Minimal Status 的状态词与对应 <code>48 × 48</code> 动画同处一行，动画右对齐；SVG 使用首帧预览，设备端循环播放。Usage 依次显示百分比、进度条和重置倒计时，5H 使用 <code>xHym</code>，Weekly 使用 <code>xDyH</code> 并在不足 24 小时时切换为 <code>xHym</code>，各数字不补前导 0。Context 标记为 <code>SESSION</code>，充电时电量文字变为绿色。双 Codex 账号同时工作时沿用主界面轮换，居中的账号标签随完整会话快照切换，不再显示 active 计数；当前版本不包含总览页或触摸事件。12 / 13 是使用固件实际 M5GFX 点阵字体生成的逐像素落地稿，不依赖浏览器字体。</p>
     <section class="grid">
       <article><h2>01 / Minimal Status</h2><p>推荐主方向 · RUNNING</p><object data="01-minimal-status.svg" type="image/svg+xml"></object></article>
       <article><h2>02 / Telemetry Status</h2><p>较高信息密度 · RUNNING</p><object data="02-telemetry-status.svg" type="image/svg+xml"></object></article>
@@ -35,6 +35,8 @@
       <article><h2>09 / Error</h2><p>Claude API 请求失败</p><object data="09-state-error.svg" type="image/svg+xml"></object></article>
       <article><h2>10 / Dual Profile · Personal</h2><p>双账号轮换第 1 帧 · Personal 正在运行</p><object data="10-dual-profile-personal.svg" type="image/svg+xml"></object></article>
       <article><h2>11 / Dual Profile · Work</h2><p>双账号轮换第 2 帧 · Work 等待授权</p><object data="11-dual-profile-work.svg" type="image/svg+xml"></object></article>
+      <article><h2>12 / Pixel-accurate · Personal</h2><p>固件字体逐像素稿 · Personal 正在运行</p><object data="12-pixel-accurate-personal.svg" type="image/svg+xml"></object></article>
+      <article><h2>13 / Pixel-accurate · Work</h2><p>固件字体逐像素稿 · Work 等待授权</p><object data="13-pixel-accurate-work.svg" type="image/svg+xml"></object></article>
     </section>
   </main>
 </body>

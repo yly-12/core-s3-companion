@@ -14,14 +14,16 @@
 | `03-pixel-terminal-status.svg` | Pixel Terminal Status | 更强烈的复古终端与开发工具感 |
 | `10-dual-profile-personal.svg` | Dual Profile Focus | Personal 与 Work 同时活跃时的 Personal 轮换帧 |
 | `11-dual-profile-work.svg` | Dual Profile Focus | Personal 与 Work 同时活跃时的 Work 轮换帧 |
+| `12-pixel-accurate-personal.svg` | Pixel-accurate | 使用固件实际点阵字体生成的 Personal 落地稿 |
+| `13-pixel-accurate-work.svg` | Pixel-accurate | 使用固件实际点阵字体生成的 Work 落地稿 |
 
 ## Codex 双账号主界面
 
-Codex 使用 `Personal` 与 `Work` 两个独立 `CODEX_HOME` 时，仍只展示主界面，不增加总览页或触摸事件。两个账号同时活跃时沿用现有会话轮换逻辑：顶栏账号标签、`ACTIVE x/y`、标题、状态、额度、Context、模型与 effort 必须作为一个完整快照一起切换。
+Codex 使用 `Personal` 与 `Work` 两个独立 `CODEX_HOME` 时，仍只展示主界面，不增加总览页或触摸事件。两个账号同时活跃时沿用现有会话轮换逻辑：顶栏账号标签、标题、状态、额度、Context、模型与 effort 必须作为一个完整快照一起切换。
 
 - `PERSONAL` 使用蓝色描边标签 `#58A6FF`。
 - `WORK` 使用紫色描边标签 `#C084FC`。
-- `ACTIVE 1/2` 表示当前显示第一个、总计两个活跃会话；只有一个活跃会话时隐藏该字段。
+- 不显示 `ACTIVE x/y` 计数，账号标签固定在顶栏水平中心，并随轮换帧切换。
 - 账号颜色只标识来源，状态颜色继续表达运行、授权、回复、完成或错误。
 - Usage 不跨账号合并，每帧只显示当前账号对应的数据。
 - `AUTH` / `REPLY` 时左侧状态条与状态文字同步闪烁，保持原有强提醒效果。
@@ -79,7 +81,14 @@ Minimal Status 同时提供完整状态：
 
 ## 字体与颜色
 
-所有文字优先使用 `Silkscreen`，不存在时回退到 `Monaco` 或等宽字体。设备画面中的最小字号约为 `11px`，状态文字约为 `30–38px`；没有依赖 7–8px 的微型注释。
+`01`–`11` 是概念稿，SVG 中的文字优先使用 `Silkscreen`，不存在时回退到 `Monaco` 或系统等宽字体。浏览器字体的实际字宽会随环境变化，不能用于验证固件的像素边界。
+
+`12`、`13` 是落地用的逐像素稿，所有文字都已转换成 SVG 矩形像素，不调用浏览器字体：
+
+- 普通文字使用 M5GFX 内置 `Font0`（经典 5×7 字形、6×8 字符格）。固件 `setTextSize(1 / 2 / 5)` 后，每个 ASCII 字符的固定字符格分别为 `6×8 / 12×16 / 30×40` 像素。
+- 标题使用与固件相同的 `fonts::efontCN_16_b`，按 M5GFX 的 U8g2 位图数据解码。
+- 顶栏账号框以屏幕中心 `x = 160` 对齐，并与左右两侧的 `CODEX`、最长电量文案 `BAT 100%` 保持充足留白。
+- 可运行 `swift design/core-s3/build_pixel_accurate_previews.swift`，从当前 PlatformIO 安装的 M5GFX 字体数据重新生成两张逐像素稿。
 
 核心颜色：
 

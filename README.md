@@ -123,8 +123,8 @@ Claude 会话标题优先使用用户明确命名的 session；未明确命名�
 各 profile 的 `session_index.jsonl` 中的 `thread_name`。用户每一轮发送的 prompt 只用于更新
 运行状态，不会覆盖标题；模型摘要暂不可用时才回退到工作区名。
 
-同时有多个普通活跃会话时，客户端每 3 秒轮播一次。Codex 会话的顶栏同时显示
-`PERSONAL` / `WORK` 与 `ACTIVE x/y`；标题、状态、Usage、Context、模型和 effort 会作为
+同时有多个普通活跃会话时，客户端每 3 秒轮播一次。Codex 会话的顶栏中央显示
+`PERSONAL` / `WORK`，不显示会话位置计数；标题、状态、Usage、Context、模型和 effort 会作为
 同一个账号快照一起切换。AUTH 与 REPLY 会立即抢占普通会话，左侧状态条与状态文字在设备上
 同步闪烁，并在用户处理完成前锁定展示、暂停轮播。
 Claude 的 `StopFailure` 会显示为 `ERROR`；取消实施计划会结合 transcript 中的用户拒绝
