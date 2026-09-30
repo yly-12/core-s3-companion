@@ -8,7 +8,8 @@
   `fetchedAtMs` 时，经过验证的 JSON 输出会在内存中优先使用，最多保留 10 分钟。
   Transcript 提供最新 `ai-title` 模型摘要，并在
   Context 缺失时按明确模型对应的窗口计算；`nameSource=derived` 的内部代号不会作为标题。
-- Codex hooks 提供事件状态，rollout JSONL 提供标题、额度、重置时间和 Context。
+- Codex 同时监控 `~/.codex-personal` 与 `~/.codex-work`；各自的 hooks 提供事件状态，
+  rollout JSONL 提供标题、额度、重置时间和 Context，账号之间不会合并 Usage。
 - 集成管理器以可逆方式合并用户配置，并在首次修改前创建备份。
 
 基于 Mach host statistics 的 CPU 采样器仅作为旧版兼容代码保留。

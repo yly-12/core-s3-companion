@@ -22,18 +22,22 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
     private let homeURL: URL
     private let applicationSupportURL: URL
     private let fileManager: FileManager
+    private let codexProfileLocations: [CodexProfileLocation]
 
     private let originalClaudeStatusLineKey = "_coreS3CompanionOriginalStatusLine"
     private let managedScriptNeedle = "core-s3-agent-hook.js"
-    private let managedAssetMarker = "core-s3-hook-schema-v8"
+    private let managedAssetMarker = "core-s3-hook-schema-v9"
 
     init(
         homeURL: URL = FileManager.default.homeDirectoryForCurrentUser,
         applicationSupportURL: URL = AgentStatusMonitor.defaultApplicationSupportURL,
+        codexProfileLocations: [CodexProfileLocation]? = nil,
         fileManager: FileManager = .default
     ) {
         self.homeURL = homeURL
         self.applicationSupportURL = applicationSupportURL
+        self.codexProfileLocations = codexProfileLocations
+            ?? CodexProfileLocation.defaults(in: homeURL)
         self.fileManager = fileManager
     }
 
@@ -53,15 +57,21 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
                 configPath: url.path
             )
         case .codex:
-            let hooksURL = codexHooksURL
-            let hooks = (try? loadJSONObject(at: hooksURL)) ?? [:]
-            let installed = containsManagedHook(in: hooks["hooks"] as? [String: Any] ?? [:])
+            let installedProfiles = codexProfileLocations.filter { location in
+                let hooks = (try? loadJSONObject(at: codexHooksURL(for: location))) ?? [:]
+                return containsManagedHook(in: hooks["hooks"] as? [String: Any] ?? [:])
+            }
+            let installed = installedProfiles.count == codexProfileLocations.count
                 && managedAssetsAreCurrent
             return AgentIntegrationStatus(
                 kind: kind,
                 isInstalled: installed,
-                detail: installed ? "Hooks 已启用；额度与重置时间从本地 rollout 被动读取" : "需要安装 Codex hooks",
-                configPath: codexConfigURL.path
+                detail: installed
+                    ? "Personal / Work Hooks 已启用；额度按账号分别读取"
+                    : "需要安装或更新 Personal / Work Codex hooks",
+                configPath: codexProfileLocations
+                    .map { codexConfigURL(for: $0).path }
+                    .joined(separator: "\n")
             )
         }
     }
@@ -72,7 +82,9 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
         case .claude:
             try installClaude()
         case .codex:
-            try installCodex()
+            for location in codexProfileLocations {
+                try installCodex(at: location)
+            }
         }
     }
 
@@ -81,7 +93,9 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
         case .claude:
             try uninstallClaude()
         case .codex:
-            try uninstallCodex()
+            for location in codexProfileLocations {
+                try uninstallCodex(at: location)
+            }
         }
     }
 
@@ -109,12 +123,12 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
         homeURL.appendingPathComponent(".claude/settings.json")
     }
 
-    private var codexHooksURL: URL {
-        homeURL.appendingPathComponent(".codex/hooks.json")
+    private func codexHooksURL(for location: CodexProfileLocation) -> URL {
+        location.homeURL.appendingPathComponent("hooks.json")
     }
 
-    private var codexConfigURL: URL {
-        homeURL.appendingPathComponent(".codex/config.toml")
+    private func codexConfigURL(for location: CodexProfileLocation) -> URL {
+        location.homeURL.appendingPathComponent("config.toml")
     }
 
     private var managedAssetsAreCurrent: Bool {
@@ -179,7 +193,9 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
         try writeJSONObject(settings, to: claudeSettingsURL, backingUpExisting: true)
     }
 
-    private func installCodex() throws {
+    private func installCodex(at location: CodexProfileLocation) throws {
+        let codexHooksURL = codexHooksURL(for: location)
+        let codexConfigURL = codexConfigURL(for: location)
         try fileManager.createDirectory(
             at: codexHooksURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -195,7 +211,7 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
                 ("PermissionRequest", nil),
                 ("Stop", nil),
             ],
-            command: managedHookCommand(source: "codex")
+            command: managedHookCommand(source: "codex", codexProfile: location.profile)
         )
         try writeJSONObject(root, to: codexHooksURL, backingUpExisting: true)
 
@@ -207,7 +223,8 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
         }
     }
 
-    private func uninstallCodex() throws {
+    private func uninstallCodex(at location: CodexProfileLocation) throws {
+        let codexHooksURL = codexHooksURL(for: location)
         guard fileManager.fileExists(atPath: codexHooksURL.path) else { return }
         var root = try loadJSONObject(at: codexHooksURL)
         root["hooks"] = removingManagedHooks(from: root["hooks"] as? [String: Any] ?? [:])
@@ -248,8 +265,11 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: claudeStatusLineScriptURL.path)
     }
 
-    private func managedHookCommand(source: String) -> String {
-        "/usr/bin/osascript -l JavaScript \(shellQuote(hookScriptURL.path)) \(shellQuote(source)) \(shellQuote(stateDirectoryURL.path)) >/dev/null 2>&1 || true"
+    private func managedHookCommand(
+        source: String,
+        codexProfile: CodexProfile = .none
+    ) -> String {
+        "/usr/bin/osascript -l JavaScript \(shellQuote(hookScriptURL.path)) \(shellQuote(source)) \(shellQuote(stateDirectoryURL.path)) \(shellQuote(codexProfile.hookValue)) >/dev/null 2>&1 || true"
     }
 
     private func mergedHooks(
@@ -372,7 +392,7 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
     }
 
     private static let jxaHookScript = #"""
-    // core-s3-hook-schema-v8
+    // core-s3-hook-schema-v9
     ObjC.import('Foundation');
 
     function readInput() {
@@ -467,6 +487,7 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
       var payload = readInput();
       var home = ObjC.unwrap($.NSHomeDirectory());
       var stateDirectory = argv[1] ? String(argv[1]) : home + '/Library/Application Support/CoreS3Companion/state';
+      var codexProfile = mode === 'codex' ? String(argv[2] || '') : '';
       var now = Date.now() / 1000;
 
       if (mode === 'claude-status') {
@@ -514,7 +535,8 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
 
       var source = mode === 'codex' ? 'codex' : 'claude';
       var id = sessionID(payload, source);
-      var path = stateDirectory + '/' + source + '-session-' + safeSessionID(id) + '.json';
+      var profileSegment = source === 'codex' && codexProfile ? '-' + safeSessionID(codexProfile) : '';
+      var path = stateDirectory + '/' + source + profileSegment + '-session-' + safeSessionID(id) + '.json';
       var previous = readJSON(path);
       var event = String(payload.hook_event_name || payload.hookEventName || '');
       var state = String(previous.state || 'idle');
@@ -553,6 +575,7 @@ final class AgentIntegrationManager: AgentIntegrationManaging {
       writeJSON(path, {
         sessionID: id,
         source: source,
+        codexProfile: codexProfile,
         state: state,
         title: title,
         titleSource: titleSource,

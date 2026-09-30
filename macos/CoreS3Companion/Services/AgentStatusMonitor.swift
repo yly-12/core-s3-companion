@@ -18,17 +18,16 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
     var defaultTool: DefaultAgentTool = .claude
 
     private let stateDirectoryURL: URL
-    private let codexSessionsURL: URL
+    private let codexProfileLocations: [CodexProfileLocation]
     private let claudeSessionsURL: URL
     private let claudeProjectsURL: URL
     private let claudeConfigurationURL: URL
-    private let codexSessionIndexURL: URL
     private let fileManager: FileManager
     private let claudeUsageRefresher: ClaudeUsageRefreshing?
     private let currentDate: () -> Date
     private var timer: Timer?
-    private var codexRolloutCache: [URL: CodexRolloutReader.CacheEntry] = [:]
-    private var cachedCodexRollouts: [CodexRolloutReader.Snapshot] = []
+    private var codexRolloutCaches: [CodexProfile: [URL: CodexRolloutReader.CacheEntry]] = [:]
+    private var cachedCodexRollouts: [ProfiledCodexRollout] = []
     private var lastCodexScanAt = Date.distantPast
     private var claudeHookRecordCache: [URL: HookRecordCacheEntry] = [:]
     private var codexHookRecordCache: [URL: HookRecordCacheEntry] = [:]
@@ -41,26 +40,39 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
 
     init(
         stateDirectoryURL: URL = AgentStatusMonitor.defaultStateDirectoryURL,
-        codexSessionsURL: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex/sessions", isDirectory: true),
+        codexSessionsURL: URL? = nil,
         claudeSessionsURL: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/sessions", isDirectory: true),
         claudeProjectsURL: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/projects", isDirectory: true),
         claudeConfigurationURL: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude.json"),
-        codexSessionIndexURL: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".codex/session_index.jsonl"),
+        codexSessionIndexURL: URL? = nil,
+        codexProfileLocations: [CodexProfileLocation]? = nil,
         fileManager: FileManager = .default,
         claudeUsageRefresher: ClaudeUsageRefreshing? = nil,
         currentDate: @escaping () -> Date = Date.init
     ) {
         self.stateDirectoryURL = stateDirectoryURL
-        self.codexSessionsURL = codexSessionsURL
+        let userHomeURL = FileManager.default.homeDirectoryForCurrentUser
+        if let codexProfileLocations {
+            self.codexProfileLocations = codexProfileLocations
+        } else if codexSessionsURL != nil || codexSessionIndexURL != nil {
+            let legacyHomeURL = userHomeURL.appendingPathComponent(".codex", isDirectory: true)
+            self.codexProfileLocations = [CodexProfileLocation(
+                profile: .none,
+                homeURL: legacyHomeURL,
+                sessionsURL: codexSessionsURL
+                    ?? legacyHomeURL.appendingPathComponent("sessions", isDirectory: true),
+                sessionIndexURL: codexSessionIndexURL
+                    ?? legacyHomeURL.appendingPathComponent("session_index.jsonl")
+            )]
+        } else {
+            self.codexProfileLocations = CodexProfileLocation.defaults(in: userHomeURL)
+        }
         self.claudeSessionsURL = claudeSessionsURL
         self.claudeProjectsURL = claudeProjectsURL
         self.claudeConfigurationURL = claudeConfigurationURL
-        self.codexSessionIndexURL = codexSessionIndexURL
         self.fileManager = fileManager
         self.claudeUsageRefresher = claudeUsageRefresher
         self.currentDate = currentDate
@@ -196,28 +208,41 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
 
     private func mergeCodex(
         hooks: [StatusRecord],
-        rollouts: [CodexRolloutReader.Snapshot],
-        sessionTitles: [String: String]
+        rollouts: [ProfiledCodexRollout],
+        sessionTitles: [CodexSessionKey: String]
     ) -> [AgentSnapshot] {
-        let globalUsage = rollouts.compactMap(\.usage).max(by: {
-            ($0.updatedAt ?? .distantPast) < ($1.updatedAt ?? .distantPast)
-        })
-        var rolloutByID: [String: CodexRolloutReader.Snapshot] = [:]
-        for rollout in rollouts where rolloutByID[rollout.record.sessionID] == nil {
-            rolloutByID[rollout.record.sessionID] = rollout
+        var latestUsageByProfile: [CodexProfile: AgentUsage] = [:]
+        for rollout in rollouts {
+            guard let usage = rollout.snapshot.usage else { continue }
+            if let current = latestUsageByProfile[rollout.profile],
+               (current.updatedAt ?? .distantPast) >= (usage.updatedAt ?? .distantPast) {
+                continue
+            }
+            latestUsageByProfile[rollout.profile] = usage
+        }
+
+        var rolloutByID: [CodexSessionKey: ProfiledCodexRollout] = [:]
+        for rollout in rollouts {
+            let key = CodexSessionKey(
+                profile: rollout.profile,
+                sessionID: rollout.snapshot.record.sessionID
+            )
+            if rolloutByID[key] == nil { rolloutByID[key] = rollout }
         }
         var results: [AgentSnapshot] = []
 
         for hook in hooks {
-            let rollout = rolloutByID.removeValue(forKey: hook.sessionID)
-            let rolloutRecord = rollout?.record
+            let key = CodexSessionKey(profile: hook.codexProfile, sessionID: hook.sessionID)
+            let rollout = rolloutByID.removeValue(forKey: key)
+            let rolloutRecord = rollout?.snapshot.record
             let stateRecord = newest(hook, rolloutRecord)
-            let usage = rollout?.usage ?? globalUsage
+            let usage = rollout?.snapshot.usage ?? latestUsageByProfile[hook.codexProfile]
             results.append(AgentSnapshot(
                 sessionID: hook.sessionID,
                 source: .codex,
+                codexProfile: hook.codexProfile,
                 state: stateRecord.state,
-                title: nonEmpty(sessionTitles[hook.sessionID])
+                title: nonEmpty(sessionTitles[key])
                     ?? nonEmpty(hook.title)
                     ?? nonEmpty(rolloutRecord?.title)
                     ?? "CODEX SESSION",
@@ -225,7 +250,7 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
                 effort: nonEmpty(rolloutRecord?.effort) ?? nonEmpty(hook.effort),
                 fiveHourRemaining: usage?.fiveHourRemaining,
                 weeklyRemaining: usage?.weeklyRemaining,
-                contextUsed: rollout?.usage?.contextUsed ?? hook.contextUsed,
+                contextUsed: rollout?.snapshot.usage?.contextUsed ?? hook.contextUsed,
                 fiveHourResetsAt: usage?.fiveHourResetsAt,
                 weeklyResetsAt: usage?.weeklyResetsAt,
                 updatedAt: stateRecord.updatedAt
@@ -233,22 +258,25 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
         }
 
         for rollout in rolloutByID.values {
-            let usage = rollout.usage ?? globalUsage
+            let record = rollout.snapshot.record
+            let key = CodexSessionKey(profile: rollout.profile, sessionID: record.sessionID)
+            let usage = rollout.snapshot.usage ?? latestUsageByProfile[rollout.profile]
             results.append(AgentSnapshot(
-                sessionID: rollout.record.sessionID,
+                sessionID: record.sessionID,
                 source: .codex,
-                state: rollout.record.state,
-                title: nonEmpty(sessionTitles[rollout.record.sessionID])
-                    ?? nonEmpty(rollout.record.title)
+                codexProfile: rollout.profile,
+                state: record.state,
+                title: nonEmpty(sessionTitles[key])
+                    ?? nonEmpty(record.title)
                     ?? "CODEX SESSION",
-                modelName: nonEmpty(rollout.record.modelName),
-                effort: nonEmpty(rollout.record.effort),
+                modelName: nonEmpty(record.modelName),
+                effort: nonEmpty(record.effort),
                 fiveHourRemaining: usage?.fiveHourRemaining,
                 weeklyRemaining: usage?.weeklyRemaining,
-                contextUsed: rollout.usage?.contextUsed,
+                contextUsed: rollout.snapshot.usage?.contextUsed,
                 fiveHourResetsAt: usage?.fiveHourResetsAt,
                 weeklyResetsAt: usage?.weeklyResetsAt,
-                updatedAt: rollout.record.updatedAt
+                updatedAt: record.updatedAt
             ))
         }
         return results
@@ -276,19 +304,24 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
         return titles
     }
 
-    private func loadCodexSessionTitles() -> [String: String] {
-        guard let contents = try? String(contentsOf: codexSessionIndexURL, encoding: .utf8) else {
-            return [:]
-        }
-
-        var titles: [String: String] = [:]
-        contents.enumerateLines { line, _ in
-            guard let data = line.data(using: .utf8),
-                  let metadata = try? JSONDecoder().decode(CodexSessionMetadata.self, from: data),
-                  let title = self.nonEmpty(metadata.threadName) else {
-                return
+    private func loadCodexSessionTitles() -> [CodexSessionKey: String] {
+        var titles: [CodexSessionKey: String] = [:]
+        for location in codexProfileLocations {
+            guard let contents = try? String(
+                contentsOf: location.sessionIndexURL,
+                encoding: .utf8
+            ) else {
+                continue
             }
-            titles[metadata.id] = title
+            contents.enumerateLines { line, _ in
+                guard let data = line.data(using: .utf8),
+                      let metadata = try? JSONDecoder().decode(CodexSessionMetadata.self, from: data),
+                      let title = self.nonEmpty(metadata.threadName) else {
+                    return
+                }
+                let key = CodexSessionKey(profile: location.profile, sessionID: metadata.id)
+                titles[key] = title
+            }
         }
         return titles
     }
@@ -301,7 +334,11 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
             options: [.skipsHiddenFiles]
         ) {
             urls.append(contentsOf: contents.filter {
-                $0.lastPathComponent.hasPrefix("\(source.rawValue)-session-") && $0.pathExtension == "json"
+                let name = $0.lastPathComponent
+                let matchesSource = source == .codex
+                    ? name.hasPrefix("codex-") && name.contains("-session-")
+                    : name.hasPrefix("\(source.rawValue)-session-")
+                return matchesSource && $0.pathExtension == "json"
             })
         }
         let legacyURL = stateDirectoryURL.appendingPathComponent("\(source.rawValue)-state.json")
@@ -318,8 +355,9 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
         }
 
         let retainedURLs = Set(urls)
+        let monitoredCodexProfiles = Set(codexProfileLocations.map(\.profile))
         cache = cache.filter { retainedURLs.contains($0.key) }
-        var recordsByID: [String: StatusRecord] = [:]
+        var recordsByID: [CodexSessionKey: StatusRecord] = [:]
         for url in urls {
             guard let values = try? url.resourceValues(
                 forKeys: [.contentModificationDateKey, .fileSizeKey]
@@ -343,6 +381,9 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
                     decodedRecord = StatusRecord(
                         sessionID: nonEmpty(payload.sessionID) ?? fallbackID,
                         source: source,
+                        codexProfile: source == .codex
+                            ? CodexProfile(hookValue: payload.codexProfile)
+                            : .none,
                         state: state,
                         title: payload.title ?? "",
                         modelName: payload.modelName,
@@ -361,11 +402,19 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
                 guard let decodedRecord else { continue }
                 record = decodedRecord
             }
-            if let existing = recordsByID[record.sessionID],
+            if source == .codex,
+               !monitoredCodexProfiles.contains(record.codexProfile) {
+                continue
+            }
+            let key = CodexSessionKey(
+                profile: record.codexProfile,
+                sessionID: record.sessionID
+            )
+            if let existing = recordsByID[key],
                (existing.updatedAt ?? .distantPast) >= (record.updatedAt ?? .distantPast) {
                 continue
             }
-            recordsByID[record.sessionID] = record
+            recordsByID[key] = record
         }
         switch source {
         case .claude:
@@ -549,17 +598,24 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
         claudeTranscriptCache = claudeTranscriptCache.filter { retainedURLs.contains($0.key) }
     }
 
-    private func loadCodexRollouts() -> [CodexRolloutReader.Snapshot] {
+    private func loadCodexRollouts() -> [ProfiledCodexRollout] {
         let now = currentDate()
         guard now.timeIntervalSince(lastCodexScanAt) >= 3 else {
             return cachedCodexRollouts
         }
         lastCodexScanAt = now
-        cachedCodexRollouts = CodexRolloutReader.loadRecent(
-            from: codexSessionsURL,
-            fileManager: fileManager,
-            cache: &codexRolloutCache
-        )
+        cachedCodexRollouts = codexProfileLocations.flatMap { location in
+            var cache = codexRolloutCaches[location.profile] ?? [:]
+            let snapshots = CodexRolloutReader.loadRecent(
+                from: location.sessionsURL,
+                fileManager: fileManager,
+                cache: &cache
+            )
+            codexRolloutCaches[location.profile] = cache
+            return snapshots.map {
+                ProfiledCodexRollout(profile: location.profile, snapshot: $0)
+            }
+        }
         return cachedCodexRollouts
     }
 
@@ -625,6 +681,7 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
 
 private struct HookStatePayload: Decodable {
     var sessionID: String?
+    var codexProfile: String?
     var state: String
     var title: String?
     var modelName: String?
@@ -727,12 +784,23 @@ private struct CodexSessionMetadata: Decodable {
 private struct StatusRecord {
     var sessionID: String
     var source: AgentSource
+    var codexProfile: CodexProfile = .none
     var state: AgentRunState
     var title: String
     var modelName: String? = nil
     var effort: String? = nil
     var contextUsed: UInt8?
     var updatedAt: Date?
+}
+
+private struct CodexSessionKey: Hashable {
+    var profile: CodexProfile
+    var sessionID: String
+}
+
+private struct ProfiledCodexRollout {
+    var profile: CodexProfile
+    var snapshot: CodexRolloutReader.Snapshot
 }
 
 private struct HookRecordCacheEntry {

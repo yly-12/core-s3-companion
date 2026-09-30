@@ -88,6 +88,35 @@ void testParsesPowerAwareDisplaySettingsAndResetCountdowns() {
   TEST_ASSERT_EQUAL_UINT16(4800, message.weeklyResetMinutes);
 }
 
+void testParsesCodexProfileAndRotationPosition() {
+  const std::uint8_t frame[] = {
+      0x01, 0x02, 0x01, 0x02, 68,   42,   61,   0x00, 0x00,
+      0x00, 5,    0,    0x12, 0x34, 0x56, 0x78, 0x00, 0x86,
+      0x12, 0xC0, 0x02, 0x02, 0x02};
+  companion::protocol::AgentStatusMessage message;
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(AgentParseResult::kOk),
+      static_cast<int>(companion::protocol::parseAgentStatus(
+          frame, sizeof(frame), message)));
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(companion::protocol::CodexProfile::kWork),
+      static_cast<int>(message.codexProfile));
+  TEST_ASSERT_EQUAL_UINT8(2, message.activeIndex);
+  TEST_ASSERT_EQUAL_UINT8(2, message.activeCount);
+}
+
+void testRejectsInvalidRotationPosition() {
+  const std::uint8_t frame[] = {
+      0x01, 0x02, 0x01, 0x02, 68,   42,   61,   0x00, 0x00,
+      0x00, 5,    0,    0x12, 0x34, 0x56, 0x78, 0x00, 0x86,
+      0x12, 0xC0, 0x01, 0x03, 0x02};
+  companion::protocol::AgentStatusMessage message;
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(AgentParseResult::kInvalidMetadata),
+      static_cast<int>(companion::protocol::parseAgentStatus(
+          frame, sizeof(frame), message)));
+}
+
 void testAgentStatusRejectsInvalidDisplayTimeout() {
   const std::uint8_t frame[] = {0x01, 0x02, 0x00, 0x01, 0xFF,
                                 0xFF, 0xFF, 0x00, 0x00, 0x00,
@@ -345,6 +374,8 @@ int main(int, char**) {
   RUN_TEST(testParsesAgentStatus);
   RUN_TEST(testParsesExtendedAgentStatus);
   RUN_TEST(testParsesPowerAwareDisplaySettingsAndResetCountdowns);
+  RUN_TEST(testParsesCodexProfileAndRotationPosition);
+  RUN_TEST(testRejectsInvalidRotationPosition);
   RUN_TEST(testAgentStatusRejectsInvalidDisplayTimeout);
   RUN_TEST(testAgentStatusAcceptsUnknownMetrics);
   RUN_TEST(testAgentStatusAcceptsCancelledAndFailedStates);

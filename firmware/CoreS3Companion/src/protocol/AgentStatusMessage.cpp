@@ -103,6 +103,9 @@ AgentParseResult parseAgentStatus(const std::uint8_t* data,
   std::uint32_t activityToken = 0;
   std::uint16_t fiveHourResetMinutes = kUnknownResetMinutes;
   std::uint16_t weeklyResetMinutes = kUnknownResetMinutes;
+  CodexProfile codexProfile = CodexProfile::kNone;
+  std::uint8_t activeIndex = 0;
+  std::uint8_t activeCount = 0;
   if (length != legacyLength) {
     if (length < legacyLength + 2) {
       return AgentParseResult::kInvalidLength;
@@ -115,7 +118,8 @@ AgentParseResult parseAgentStatus(const std::uint8_t* data,
         effortLength > kMaximumEffortLength ||
         (length != metadataLength &&
          length != metadataLength + kLegacyDisplaySettingsLength &&
-         length != metadataLength + kDisplaySettingsLength)) {
+         length != metadataLength + kDisplaySettingsLength &&
+         length != metadataLength + kProfileDisplaySettingsLength)) {
       return AgentParseResult::kInvalidLength;
     }
     modelData = data + legacyLength + 2;
@@ -136,7 +140,8 @@ AgentParseResult parseAgentStatus(const std::uint8_t* data,
           (static_cast<std::uint32_t>(data[metadataLength + 2]) << 16) |
           (static_cast<std::uint32_t>(data[metadataLength + 3]) << 8) |
           static_cast<std::uint32_t>(data[metadataLength + 4]);
-    } else if (length == metadataLength + kDisplaySettingsLength) {
+    } else if (length == metadataLength + kDisplaySettingsLength ||
+               length == metadataLength + kProfileDisplaySettingsLength) {
       displayTimeoutOnBatteryMinutes = data[metadataLength];
       displayTimeoutOnExternalPowerMinutes = data[metadataLength + 1];
       if (displayTimeoutOnBatteryMinutes > kMaximumDisplayTimeoutMinutes ||
@@ -155,11 +160,29 @@ AgentParseResult parseAgentStatus(const std::uint8_t* data,
       weeklyResetMinutes =
           (static_cast<std::uint16_t>(data[metadataLength + 8]) << 8) |
           static_cast<std::uint16_t>(data[metadataLength + 9]);
+      if (length == metadataLength + kProfileDisplaySettingsLength) {
+        if (data[metadataLength + 10] >
+            static_cast<std::uint8_t>(CodexProfile::kWork)) {
+          return AgentParseResult::kInvalidMetadata;
+        }
+        codexProfile = static_cast<CodexProfile>(data[metadataLength + 10]);
+        activeIndex = data[metadataLength + 11];
+        activeCount = data[metadataLength + 12];
+        const bool hiddenPosition = activeIndex == 0 && activeCount == 0;
+        const bool validPosition =
+            activeCount > 1 && activeIndex > 0 && activeIndex <= activeCount;
+        if (!hiddenPosition && !validPosition) {
+          return AgentParseResult::kInvalidMetadata;
+        }
+      }
     }
   }
 
   message.state = static_cast<AgentRunState>(data[2]);
   message.source = static_cast<AgentSource>(data[3]);
+  message.codexProfile = codexProfile;
+  message.activeIndex = activeIndex;
+  message.activeCount = activeCount;
   message.fiveHourRemaining = data[4];
   message.weeklyRemaining = data[5];
   message.contextUsed = data[6];

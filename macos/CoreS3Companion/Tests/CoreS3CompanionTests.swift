@@ -29,7 +29,9 @@ struct AgentStatusMessageTests {
         #expect(Array(data.dropFirst(19).prefix(2)) == [8, 5])
         #expect(String(decoding: data.dropFirst(21).prefix(8), as: UTF8.self) == "OPUS 4.7")
         #expect(String(decoding: data.dropFirst(29).prefix(5), as: UTF8.self) == "XHIGH")
-        #expect(Array(data.suffix(10)) == [0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF])
+        #expect(Array(data.suffix(13)) == [
+            0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0,
+        ])
     }
 
     @Test("Encodes display timeout and activity marker")
@@ -42,7 +44,9 @@ struct AgentStatusMessageTests {
             screenTimeoutOnBattery: .fiveMinutes
         )
 
-        #expect(Array(data.suffix(10)) == [5, 0, 0, 0, 4, 210, 0xFF, 0xFF, 0xFF, 0xFF])
+        #expect(Array(data.suffix(13)) == [
+            5, 0, 0, 0, 4, 210, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0,
+        ])
     }
 
     @Test("Encodes separate power timeouts and reset countdowns")
@@ -59,7 +63,9 @@ struct AgentStatusMessageTests {
             now: now
         )
 
-        #expect(Array(data.suffix(10)) == [5, 0, 0, 0, 0, 0, 0x00, 0x86, 0x12, 0xC0])
+        #expect(Array(data.suffix(13)) == [
+            5, 0, 0, 0, 0, 0, 0x00, 0x86, 0x12, 0xC0, 0, 0, 0,
+        ])
         #expect(UsageResetCountdown.display(minutes: 134, weekly: false) == "2H14m")
         #expect(UsageResetCountdown.display(minutes: 121, weekly: false) == "2H1m")
         #expect(UsageResetCountdown.display(minutes: 4_800, weekly: true) == "3D8H")
@@ -73,6 +79,21 @@ struct AgentStatusMessageTests {
     func unknownMetricsUseSentinel() throws {
         let data = try AgentStatusMessageEncoder.encode(.idle)
         #expect(Array(Array(data)[4...6]) == [0xFF, 0xFF, 0xFF])
+    }
+
+    @Test("Encodes Codex profile and active rotation position")
+    func encodesCodexProfileAndRotation() throws {
+        var snapshot = AgentSnapshot.idle
+        snapshot.source = .codex
+        snapshot.codexProfile = .work
+
+        let data = try AgentStatusMessageEncoder.encode(
+            snapshot,
+            activeIndex: 2,
+            activeCount: 2
+        )
+
+        #expect(Array(data.suffix(3)) == [CodexProfile.work.rawValue, 2, 2])
     }
 
     @Test("Encodes cancelled and failed terminal states")
@@ -342,16 +363,33 @@ struct AgentIntegrationManagerTests {
         let support = root.appendingPathComponent("support", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let configURL = home.appendingPathComponent(".codex/config.toml")
-        try FileManager.default.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try "model = \"gpt-5\"\n".write(to: configURL, atomically: true, encoding: .utf8)
+        let configURLs = [".codex-personal", ".codex-work"].map {
+            home.appendingPathComponent("\($0)/config.toml")
+        }
+        for configURL in configURLs {
+            try FileManager.default.createDirectory(
+                at: configURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try "model = \"gpt-5\"\n".write(
+                to: configURL,
+                atomically: true,
+                encoding: .utf8
+            )
+        }
 
         let manager = AgentIntegrationManager(homeURL: home, applicationSupportURL: support)
         try manager.install(.codex)
-        let config = try String(contentsOf: configURL, encoding: .utf8)
-        #expect(config.contains("model = \"gpt-5\""))
-        #expect(config.contains("[features]"))
-        #expect(config.contains("hooks = true"))
+        for configURL in configURLs {
+            let config = try String(contentsOf: configURL, encoding: .utf8)
+            #expect(config.contains("model = \"gpt-5\""))
+            #expect(config.contains("[features]"))
+            #expect(config.contains("hooks = true"))
+            #expect(FileManager.default.fileExists(
+                atPath: configURL.deletingLastPathComponent()
+                    .appendingPathComponent("hooks.json").path
+            ))
+        }
         #expect(manager.status(for: .codex).isInstalled)
     }
 }
@@ -425,6 +463,80 @@ struct AgentStatusMonitorTests {
         #expect(snapshot?.weeklyRemaining == 68)
         #expect(snapshot?.contextUsed == 61)
         #expect(snapshot?.weeklyResetsAt == Date(timeIntervalSince1970: 2_000_300_000))
+    }
+
+    @Test("Keeps Personal and Work sessions and quotas isolated")
+    func keepsCodexProfilesIsolated() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("core-s3-codex-profiles-\(UUID().uuidString)", isDirectory: true)
+        let states = root.appendingPathComponent("state", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: states, withIntermediateDirectories: true)
+
+        let specifications: [(CodexProfile, String, Int)] = [
+            (.personal, "Personal task", 32),
+            (.work, "Work task", 72),
+        ]
+        var locations: [CodexProfileLocation] = []
+        for (profile, title, usedPercent) in specifications {
+            let home = root.appendingPathComponent(profile.hookValue, isDirectory: true)
+            let sessions = home.appendingPathComponent("sessions/2026/09/30", isDirectory: true)
+            try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+            let lines = [
+                try rolloutRecord(outerType: "session_meta", payload: [
+                    "id": "shared-session-id",
+                    "cwd": "/tmp/\(profile.hookValue)",
+                ]),
+                try rolloutLine(type: "task_started", payload: [:]),
+                try rolloutLine(type: "token_count", payload: [
+                    "rate_limits": [
+                        "primary": [
+                            "used_percent": usedPercent,
+                            "window_minutes": 10_080,
+                        ],
+                    ],
+                    "info": [
+                        "last_token_usage": ["total_tokens": 20_000],
+                        "model_context_window": 100_000,
+                    ],
+                ]),
+            ]
+            try lines.joined(separator: "\n").write(
+                to: sessions.appendingPathComponent("rollout-\(profile.hookValue).jsonl"),
+                atomically: true,
+                encoding: .utf8
+            )
+            try rolloutRecord(outerType: nil, payload: [
+                "id": "shared-session-id",
+                "thread_name": title,
+            ]).write(
+                to: home.appendingPathComponent("session_index.jsonl"),
+                atomically: true,
+                encoding: .utf8
+            )
+            locations.append(CodexProfileLocation(profile: profile, homeURL: home))
+        }
+
+        let monitor = AgentStatusMonitor(
+            stateDirectoryURL: states,
+            claudeSessionsURL: root.appendingPathComponent("no-claude-sessions"),
+            claudeProjectsURL: root.appendingPathComponent("no-claude-projects"),
+            claudeConfigurationURL: root.appendingPathComponent("no-claude-configuration"),
+            codexProfileLocations: locations
+        )
+        monitor.selectedSource = .codex
+        var snapshots: [AgentSnapshot] = []
+        monitor.onSnapshots = { snapshots = $0 }
+        monitor.refresh()
+
+        let byProfile = Dictionary(uniqueKeysWithValues: snapshots.map {
+            ($0.codexProfile, $0)
+        })
+        #expect(snapshots.count == 2)
+        #expect(byProfile[.personal]?.title == "Personal task")
+        #expect(byProfile[.personal]?.weeklyRemaining == 68)
+        #expect(byProfile[.work]?.title == "Work task")
+        #expect(byProfile[.work]?.weeklyRemaining == 28)
     }
 
     @Test("Incrementally parses lines appended to a Codex rollout")
@@ -1061,8 +1173,8 @@ struct CompanionViewModelTests {
 
         #expect(model.agentSnapshot.sessionID == "second")
         #expect(transport.sentPackets.suffix(2) == [
-            try AgentStatusMessageEncoder.encode(first),
-            try AgentStatusMessageEncoder.encode(second),
+            try AgentStatusMessageEncoder.encode(first, activeIndex: 1, activeCount: 2),
+            try AgentStatusMessageEncoder.encode(second, activeIndex: 2, activeCount: 2),
         ])
     }
 

@@ -24,6 +24,72 @@ enum AgentSource: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+enum CodexProfile: UInt8, CaseIterable, Codable, Identifiable {
+    case none = 0
+    case personal = 1
+    case work = 2
+
+    var id: UInt8 { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .none: ""
+        case .personal: "Personal"
+        case .work: "Work"
+        }
+    }
+
+    var hookValue: String {
+        switch self {
+        case .none: ""
+        case .personal: "personal"
+        case .work: "work"
+        }
+    }
+
+    init(hookValue: String?) {
+        switch hookValue?.lowercased() {
+        case "personal": self = .personal
+        case "work": self = .work
+        default: self = .none
+        }
+    }
+}
+
+struct CodexProfileLocation: Equatable {
+    var profile: CodexProfile
+    var homeURL: URL
+    var sessionsURL: URL
+    var sessionIndexURL: URL
+
+    init(profile: CodexProfile, homeURL: URL) {
+        self.profile = profile
+        self.homeURL = homeURL
+        sessionsURL = homeURL.appendingPathComponent("sessions", isDirectory: true)
+        sessionIndexURL = homeURL.appendingPathComponent("session_index.jsonl")
+    }
+
+    init(profile: CodexProfile, homeURL: URL, sessionsURL: URL, sessionIndexURL: URL) {
+        self.profile = profile
+        self.homeURL = homeURL
+        self.sessionsURL = sessionsURL
+        self.sessionIndexURL = sessionIndexURL
+    }
+
+    static func defaults(in homeURL: URL) -> [CodexProfileLocation] {
+        [
+            CodexProfileLocation(
+                profile: .personal,
+                homeURL: homeURL.appendingPathComponent(".codex-personal", isDirectory: true)
+            ),
+            CodexProfileLocation(
+                profile: .work,
+                homeURL: homeURL.appendingPathComponent(".codex-work", isDirectory: true)
+            ),
+        ]
+    }
+}
+
 enum DefaultAgentTool: String, CaseIterable, Codable, Identifiable {
     case claude
     case codex
@@ -112,6 +178,7 @@ enum AgentRunState: UInt8, Codable, CaseIterable {
 struct AgentSnapshot: Equatable {
     var sessionID: String = "default"
     var source: AgentSource
+    var codexProfile: CodexProfile = .none
     var state: AgentRunState
     var title: String
     var modelName: String? = nil

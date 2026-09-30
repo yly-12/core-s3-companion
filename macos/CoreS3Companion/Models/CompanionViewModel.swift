@@ -182,6 +182,8 @@ final class CompanionViewModel: ObservableObject {
                   agentSnapshot,
                   screenTimeoutOnBattery: displaySleepTimeoutOnBattery,
                   screenTimeoutOnExternalPower: displaySleepTimeoutOnExternalPower,
+                  activeIndex: agentSnapshots.count > 1 ? UInt8(clamping: rotationIndex + 1) : 0,
+                  activeCount: agentSnapshots.count > 1 ? UInt8(clamping: agentSnapshots.count) : 0,
                   activityAt: agentSnapshots.compactMap(\.updatedAt).max(),
                   now: now
               ) else {
@@ -199,16 +201,20 @@ final class CompanionViewModel: ObservableObject {
 
     private func statusFingerprint(for packet: Data) -> Data {
         var fingerprint = packet
-        // The four-byte activity token sits before the two reset countdowns.
+        // The four-byte activity token sits before reset countdowns and profile metadata.
         // It can advance every poll without changing anything visible on CoreS3.
-        guard fingerprint.count >= 8 else { return fingerprint }
-        fingerprint.replaceSubrange((fingerprint.count - 8)..<(fingerprint.count - 4), with: repeatElement(0, count: 4))
+        guard fingerprint.count >= 11 else { return fingerprint }
+        fingerprint.replaceSubrange(
+            (fingerprint.count - 11)..<(fingerprint.count - 7),
+            with: repeatElement(0, count: 4)
+        )
         return fingerprint
     }
 
     private func receive(_ snapshots: [AgentSnapshot]) {
         let snapshots = snapshots.isEmpty ? [.idle] : snapshots
         let currentID = agentSnapshot.sessionID
+        let currentProfile = agentSnapshot.codexProfile
         agentSnapshots = snapshots
         let attentionIndexes = snapshots.indices.filter {
             snapshots[$0].state.requiresUserAttention
@@ -216,11 +222,14 @@ final class CompanionViewModel: ObservableObject {
         if agentSnapshot.state.requiresUserAttention,
            let index = attentionIndexes.first(where: {
                snapshots[$0].sessionID == currentID
+                   && snapshots[$0].codexProfile == currentProfile
            }) {
             rotationIndex = index
         } else if let index = attentionIndexes.first {
             rotationIndex = index
-        } else if let index = snapshots.firstIndex(where: { $0.sessionID == currentID }) {
+        } else if let index = snapshots.firstIndex(where: {
+            $0.sessionID == currentID && $0.codexProfile == currentProfile
+        }) {
             rotationIndex = index
         } else {
             rotationIndex = 0

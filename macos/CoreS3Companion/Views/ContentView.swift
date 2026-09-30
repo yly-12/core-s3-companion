@@ -186,7 +186,7 @@ private struct AgentSettingsView: View {
                         .foregroundStyle(message.contains("已") ? Color.secondary : Color.red)
                 }
 
-                Text("安装前会为已有配置创建一次 `.core-s3-companion.backup` 备份；已有 hooks 会被保留。Codex 额度来自 `~/.codex/sessions`，Claude 额度来自 status line 输入。")
+                Text("安装前会为已有配置创建一次 `.core-s3-companion.backup` 备份；已有 hooks 会被保留。Codex 分别读取 `~/.codex-personal` 与 `~/.codex-work`，Claude 额度来自 status line 输入。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -241,6 +241,17 @@ private struct AgentPreviewCard: View {
                 HStack {
                     Label(snapshot.source.displayName, systemImage: snapshot.state.systemImage)
                         .foregroundStyle(stateColor)
+                    if snapshot.source == .codex, snapshot.codexProfile != .none {
+                        Text(snapshot.codexProfile.displayName.uppercased())
+                            .font(.caption2.bold().monospaced())
+                            .foregroundStyle(profileColor)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .stroke(profileColor, lineWidth: 1)
+                            }
+                    }
                     Spacer()
                     Text(snapshot.updatedAt?.formatted(date: .omitted, time: .standard) ?? "尚无数据")
                         .foregroundStyle(.secondary)
@@ -293,6 +304,14 @@ private struct AgentPreviewCard: View {
         case .completed: .mint
         case .cancelled: .orange
         case .failed: .red
+        }
+    }
+
+    private var profileColor: Color {
+        switch snapshot.codexProfile {
+        case .personal: .blue
+        case .work: .purple
+        case .none: .secondary
         }
     }
 }

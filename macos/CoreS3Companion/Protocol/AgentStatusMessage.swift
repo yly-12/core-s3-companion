@@ -15,6 +15,8 @@ enum AgentStatusMessageEncoder {
         _ snapshot: AgentSnapshot,
         screenTimeoutOnBattery: DisplaySleepTimeout = .never,
         screenTimeoutOnExternalPower: DisplaySleepTimeout = .never,
+        activeIndex: UInt8 = 0,
+        activeCount: UInt8 = 0,
         activityAt: Date? = nil,
         now: Date = .now
     ) throws -> Data {
@@ -34,6 +36,10 @@ enum AgentStatusMessageEncoder {
 
         let metrics = [snapshot.fiveHourRemaining, snapshot.weeklyRemaining, snapshot.contextUsed]
         guard metrics.allSatisfy({ $0 == nil || $0! <= 100 }) else {
+            throw AgentStatusMessageEncodingError.valueOutOfRange
+        }
+        guard (activeCount == 0 && activeIndex == 0)
+                || (activeCount > 1 && activeIndex > 0 && activeIndex <= activeCount) else {
             throw AgentStatusMessageEncodingError.valueOutOfRange
         }
 
@@ -72,6 +78,9 @@ enum AgentStatusMessageEncoder {
             UsageResetCountdown.minutes(until: snapshot.weeklyResetsAt, now: now),
             to: &bytes
         )
+        bytes.append(snapshot.codexProfile.rawValue)
+        bytes.append(activeIndex)
+        bytes.append(activeCount)
         return Data(bytes)
     }
 

@@ -112,18 +112,21 @@ pio test -e native
   明确模型对应的 context window（包括输入、缓存和输出 token）。未知模型不会猜测窗口，
   而是显示 `--`。已有 hooks 与
   status line 会保留并在移除时恢复。
-- Codex：向 `~/.codex/hooks.json` 合并最小 hooks，在 `config.toml` 启用 hooks，额度和
-  Context 则从最近的 `~/.codex/sessions/**/rollout-*.jsonl` 被动读取。额度窗口按实际
+- Codex：分别向 `~/.codex-personal/hooks.json` 与 `~/.codex-work/hooks.json` 合并最小
+  hooks，在各自的 `config.toml` 启用 hooks，额度和 Context 则从两个 profile 最近的
+  `sessions/**/rollout-*.jsonl` 被动读取。额度窗口按实际
   `window_minutes` 分类；账号没有 5H 窗口时不显示该项。Codex 的 CTX 按最新一次
   token usage 除以该会话的模型 context window 计算，不使用跨请求累计 token。
 
 Claude 会话标题优先使用用户明确命名的 session；未明确命名时读取 transcript 中最新的
 `ai-title` 模型摘要，并忽略 `nameSource=derived` 的内部代号。Codex 读取
-`~/.codex/session_index.jsonl` 中的 `thread_name`。用户每一轮发送的 prompt 只用于更新
+各 profile 的 `session_index.jsonl` 中的 `thread_name`。用户每一轮发送的 prompt 只用于更新
 运行状态，不会覆盖标题；模型摘要暂不可用时才回退到工作区名。
 
-同时有多个普通活跃会话时，客户端每 3 秒轮播一次。AUTH 与 REPLY 会立即抢占普通会话，
-状态文字在设备上闪烁，并在用户处理完成前锁定展示、暂停轮播。
+同时有多个普通活跃会话时，客户端每 3 秒轮播一次。Codex 会话的顶栏同时显示
+`PERSONAL` / `WORK` 与 `ACTIVE x/y`；标题、状态、Usage、Context、模型和 effort 会作为
+同一个账号快照一起切换。AUTH 与 REPLY 会立即抢占普通会话，左侧状态条与状态文字在设备上
+同步闪烁，并在用户处理完成前锁定展示、暂停轮播。
 Claude 的 `StopFailure` 会显示为 `ERROR`；取消实施计划会结合 transcript 中的用户拒绝
 记录或 `[Request interrupted by user]` 中断标记显示为 `CANCEL`，不会再误报为
 `RUNNING` 或 `DONE`。状态区只显示
@@ -170,7 +173,9 @@ Agent 状态消息由 8 字节基础头部、最多 60 字节 UTF-8 标题和可
 
 标题后缀依次为 `模型名长度`、`effort 长度`、模型名 UTF-8 字节、effort UTF-8 字节、
 未接电源熄屏分钟数、已接电源熄屏分钟数、4 字节大端序活动标记、2 字节 5H 重置剩余
-分钟数和 2 字节 Weekly 重置剩余分钟数。熄屏值为 `0` 时永不熄屏，否则接受 `1...30`；
+分钟数、2 字节 Weekly 重置剩余分钟数、1 字节 Codex profile、1 字节当前轮换序号和
+1 字节活跃会话总数。profile 使用 `0=None, 1=Personal, 2=Work`；只有一个活跃会话时两个
+轮换字段都为 `0`。熄屏值为 `0` 时永不熄屏，否则接受 `1...30`；
 重置时间未知时使用 `0xFFFF`。当前解析器仍接受旧版单一熄屏字段，并同时应用到两种供电
 状态，以保留协议回归测试能力；这不代表不同 Release 的客户端与固件可以混用。屏幕底栏
 左侧显示模型，右侧显示 `EFF <LEVEL>`。

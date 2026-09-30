@@ -13,6 +13,7 @@ constexpr std::size_t kMaximumModelNameLength = 32;
 constexpr std::size_t kMaximumEffortLength = 8;
 constexpr std::size_t kLegacyDisplaySettingsLength = 5;
 constexpr std::size_t kDisplaySettingsLength = 10;
+constexpr std::size_t kProfileDisplaySettingsLength = 13;
 constexpr std::uint8_t kMaximumDisplayTimeoutMinutes = 30;
 constexpr std::uint8_t kUnknownMetricValue = 0xFF;
 constexpr std::uint16_t kUnknownResetMinutes = 0xFFFF;
@@ -33,9 +34,18 @@ enum class AgentSource : std::uint8_t {
   kCodex = 2,
 };
 
+enum class CodexProfile : std::uint8_t {
+  kNone = 0,
+  kPersonal = 1,
+  kWork = 2,
+};
+
 struct AgentStatusMessage {
   AgentRunState state = AgentRunState::kIdle;
   AgentSource source = AgentSource::kAutomatic;
+  CodexProfile codexProfile = CodexProfile::kNone;
+  std::uint8_t activeIndex = 0;
+  std::uint8_t activeCount = 0;
   std::uint8_t fiveHourRemaining = kUnknownMetricValue;
   std::uint8_t weeklyRemaining = kUnknownMetricValue;
   std::uint8_t contextUsed = kUnknownMetricValue;

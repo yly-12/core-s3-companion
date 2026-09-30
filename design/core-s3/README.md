@@ -12,6 +12,19 @@
 | `01-minimal-status.svg` | Minimal Status | 推荐首版，状态占据视觉中心，信息位置固定 |
 | `02-telemetry-status.svg` | Telemetry Status | 用卡片和进度条提高资源信息密度 |
 | `03-pixel-terminal-status.svg` | Pixel Terminal Status | 更强烈的复古终端与开发工具感 |
+| `10-dual-profile-personal.svg` | Dual Profile Focus | Personal 与 Work 同时活跃时的 Personal 轮换帧 |
+| `11-dual-profile-work.svg` | Dual Profile Focus | Personal 与 Work 同时活跃时的 Work 轮换帧 |
+
+## Codex 双账号主界面
+
+Codex 使用 `Personal` 与 `Work` 两个独立 `CODEX_HOME` 时，仍只展示主界面，不增加总览页或触摸事件。两个账号同时活跃时沿用现有会话轮换逻辑：顶栏账号标签、`ACTIVE x/y`、标题、状态、额度、Context、模型与 effort 必须作为一个完整快照一起切换。
+
+- `PERSONAL` 使用蓝色描边标签 `#58A6FF`。
+- `WORK` 使用紫色描边标签 `#C084FC`。
+- `ACTIVE 1/2` 表示当前显示第一个、总计两个活跃会话；只有一个活跃会话时隐藏该字段。
+- 账号颜色只标识来源，状态颜色继续表达运行、授权、回复、完成或错误。
+- Usage 不跨账号合并，每帧只显示当前账号对应的数据。
+- `AUTH` / `REPLY` 时左侧状态条与状态文字同步闪烁，保持原有强提醒效果。
 
 ## 状态稿
 

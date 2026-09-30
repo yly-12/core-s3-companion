@@ -57,6 +57,30 @@ std::uint16_t sourceColor(const protocol::AgentSource source) {
   return color(124, 135, 130);
 }
 
+const char* profileLabel(const protocol::CodexProfile profile) {
+  switch (profile) {
+    case protocol::CodexProfile::kPersonal:
+      return "PERSONAL";
+    case protocol::CodexProfile::kWork:
+      return "WORK";
+    case protocol::CodexProfile::kNone:
+      return "";
+  }
+  return "";
+}
+
+std::uint16_t profileColor(const protocol::CodexProfile profile) {
+  switch (profile) {
+    case protocol::CodexProfile::kPersonal:
+      return color(88, 166, 255);
+    case protocol::CodexProfile::kWork:
+      return color(192, 132, 252);
+    case protocol::CodexProfile::kNone:
+      return color(124, 135, 130);
+  }
+  return color(124, 135, 130);
+}
+
 const char* stateLabel(const protocol::AgentRunState state) {
   switch (state) {
     case protocol::AgentRunState::kIdle:
@@ -230,9 +254,11 @@ void DisplayRenderer::render(const app::CompanionState& state) {
 
   char signature[256];
   std::snprintf(
-      signature, sizeof(signature), "%u|%u|%u|%u",
+      signature, sizeof(signature), "%u|%u|%u|%u|%u|%u|%u",
       static_cast<unsigned>(displayedSource), state.batteryLevel(),
-      state.isBatteryCharging(), hasFreshStatus);
+      state.isBatteryCharging(), hasFreshStatus,
+      static_cast<unsigned>(status.codexProfile), status.activeIndex,
+      status.activeCount);
   const bool headerDirty = updateSignature(headerSignature_, signature);
 
   std::snprintf(signature, sizeof(signature), "%u|%s", hasFreshStatus, title);
@@ -296,6 +322,19 @@ void DisplayRenderer::render(const app::CompanionState& state) {
     const std::uint16_t agentColor =
         hasFreshStatus ? sourceColor(displayedSource) : muted;
     drawText(agent, 16, 11, 2, agentColor);
+    if (hasFreshStatus &&
+        status.codexProfile != protocol::CodexProfile::kNone) {
+      const std::uint16_t badgeColor = profileColor(status.codexProfile);
+      M5.Display.drawRect(63, 7, 66, 20, badgeColor);
+      drawText(profileLabel(status.codexProfile), 96, 17, 1, badgeColor,
+               middle_center);
+    }
+    if (hasFreshStatus && status.activeCount > 1) {
+      char active[16];
+      std::snprintf(active, sizeof(active), "ACTIVE %u/%u",
+                    status.activeIndex, status.activeCount);
+      drawText(active, 238, 14, 1, muted, top_right);
+    }
     char battery[12];
     if (state.batteryLevel() == protocol::kUnknownMetricValue) {
       std::snprintf(battery, sizeof(battery), "BAT --");
@@ -318,8 +357,8 @@ void DisplayRenderer::render(const app::CompanionState& state) {
     M5.Display.fillRect(0, 76, kAnimationX, 68, TFT_BLACK);
     const std::uint16_t accent =
         hasFreshStatus ? stateColor(displayedState) : muted;
-    M5.Display.fillRect(16, 76, 8, 50, accent);
     if (stateLabelVisible) {
+      M5.Display.fillRect(16, 76, 8, 50, accent);
       drawText(stateLabel(displayedState), 40, 80, 5, accent);
     }
   }
