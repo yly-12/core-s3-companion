@@ -17,5 +17,9 @@
   `auto_review` 审核命令或文件修改时保持 `RUNNING`，`user` 或未知模式保留 `AUTH`；
   明确的 `request_permissions` 用户权限请求仍显示 `AUTH`，用户提问仍显示 `REPLY`。
 - 集成管理器以可逆方式合并用户配置，并在首次修改前创建备份。
+- `AppUpdateService` 检查 GitHub 正式版、管理自动检查与跳过偏好、下载进度和取消，
+  并验证 DMG 大小和 SHA-256；检查失败不会阻断蓝牙或 Agent 监控。
+- `AppUpdateInstaller` 在后台挂载 DMG，验证 app 标识、版本、系统要求、架构和签名
+  完整性，再交给独立安装脚本等待原进程退出、替换、重启和失败回滚。
 
 基于 Mach host statistics 的 CPU 采样器仅作为旧版兼容代码保留。

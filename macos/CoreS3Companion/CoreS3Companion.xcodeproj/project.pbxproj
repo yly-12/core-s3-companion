@@ -24,6 +24,11 @@
 		A0000000000000000000000F /* AgentIntegrationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000013 /* AgentIntegrationManager.swift */; };
 		A00000000000000000000010 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000015 /* Assets.xcassets */; };
 		A00000000000000000000011 /* ClaudeUsageRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000016 /* ClaudeUsageRefresher.swift */; };
+		A00000000000000000000012 /* AppUpdateModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000017 /* AppUpdateModels.swift */; };
+		A00000000000000000000013 /* AppUpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000018 /* AppUpdateService.swift */; };
+		A00000000000000000000014 /* AppUpdateInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000019 /* AppUpdateInstaller.swift */; };
+		A00000000000000000000015 /* update-helper.sh in Resources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001A /* update-helper.sh */; };
+		A00000000000000000000016 /* AppUpdateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001B /* AppUpdateTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -59,6 +64,11 @@
 		B00000000000000000000014 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Version.xcconfig; path = ../../Version.xcconfig; sourceTree = "<group>"; };
 		B00000000000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B00000000000000000000016 /* ClaudeUsageRefresher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeUsageRefresher.swift; sourceTree = "<group>"; };
+		B00000000000000000000017 /* AppUpdateModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateModels.swift; sourceTree = "<group>"; };
+		B00000000000000000000018 /* AppUpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateService.swift; sourceTree = "<group>"; };
+		B00000000000000000000019 /* AppUpdateInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateInstaller.swift; sourceTree = "<group>"; };
+		B0000000000000000000001A /* update-helper.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = update-helper.sh; sourceTree = "<group>"; };
+		B0000000000000000000001B /* AppUpdateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -99,6 +109,7 @@
 		C00000000000000000000011 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				B0000000000000000000001A /* update-helper.sh */,
 				B00000000000000000000015 /* Assets.xcassets */,
 				B00000000000000000000001 /* CoreS3CompanionApp.swift */,
 				B0000000000000000000000B /* Info.plist */,
@@ -110,6 +121,7 @@
 		C00000000000000000000012 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				B00000000000000000000017 /* AppUpdateModels.swift */,
 				B0000000000000000000000F /* AgentModels.swift */,
 				B00000000000000000000003 /* BLEModels.swift */,
 				B00000000000000000000002 /* CompanionViewModel.swift */,
@@ -129,6 +141,8 @@
 		C00000000000000000000014 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				B00000000000000000000019 /* AppUpdateInstaller.swift */,
+				B00000000000000000000018 /* AppUpdateService.swift */,
 				B00000000000000000000013 /* AgentIntegrationManager.swift */,
 				B00000000000000000000011 /* AgentPreferenceStore.swift */,
 				B00000000000000000000012 /* AgentStatusMonitor.swift */,
@@ -158,6 +172,7 @@
 		C00000000000000000000017 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				B0000000000000000000001B /* AppUpdateTests.swift */,
 				B00000000000000000000009 /* CoreS3CompanionTests.swift */,
 			);
 			path = Tests;
@@ -262,6 +277,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A00000000000000000000015 /* update-helper.sh in Resources */,
 				A00000000000000000000010 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -280,6 +296,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A00000000000000000000014 /* AppUpdateInstaller.swift in Sources */,
+				A00000000000000000000013 /* AppUpdateService.swift in Sources */,
+				A00000000000000000000012 /* AppUpdateModels.swift in Sources */,
 				A00000000000000000000001 /* CoreS3CompanionApp.swift in Sources */,
 				A00000000000000000000002 /* CompanionViewModel.swift in Sources */,
 				A0000000000000000000000B /* AgentModels.swift in Sources */,
@@ -301,6 +320,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A00000000000000000000016 /* AppUpdateTests.swift in Sources */,
 				A00000000000000000000009 /* CoreS3CompanionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

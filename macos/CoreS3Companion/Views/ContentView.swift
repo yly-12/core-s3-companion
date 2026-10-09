@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: CompanionViewModel
+    @EnvironmentObject private var updater: AppUpdateService
 
     var body: some View {
         TabView {
@@ -16,6 +17,9 @@ struct ContentView: View {
                 .tabItem { Label("关于", systemImage: "info.circle") }
         }
         .frame(minWidth: 680, minHeight: 520)
+        .sheet(item: $updater.promptRelease) { release in
+            AppUpdateView(release: release).environmentObject(updater)
+        }
     }
 }
 
@@ -419,20 +423,122 @@ private struct ConnectionBadge: View {
 }
 
 private struct GeneralSettingsView: View {
+    @EnvironmentObject private var updater: AppUpdateService
+
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "display.2")
-                .font(.system(size: 48))
-                .foregroundStyle(.blue)
-            Text("CoreS3 Companion")
-                .font(.title.bold())
-            Text("菜单栏中的 Claude / Codex 状态显示器")
+        ScrollView {
+            VStack(spacing: 16) {
+                Image(systemName: "display.2")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.blue)
+                Text("CoreS3 Companion")
+                    .font(.title.bold())
+                Text("菜单栏中的 Claude / Codex 状态显示器")
+                    .foregroundStyle(.secondary)
+                Text("版本 \(updater.currentVersion)")
+                    .foregroundStyle(.secondary)
+                GroupBox("软件更新") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Toggle("自动检查更新", isOn: $updater.automaticChecks)
+                        Text("启动时及每 24 小时检查一次，每个新版本只自动提示一次。")
+                            .font(.caption).foregroundStyle(.secondary)
+                        AppUpdateStatusView()
+                        if let failure = updater.previousInstallationFailure {
+                            Text(failure).font(.callout).foregroundStyle(.red)
+                        }
+                        HStack {
+                            Button("检查更新") { updater.check() }.disabled(updater.state.isBusy)
+                            if let release = updater.release {
+                                Button("查看 \(release.tag) 更新") { updater.promptRelease = release }
+                                    .disabled(updater.state.isBusy)
+                            }
+                        }
+                        if let date = updater.lastCheckedAt {
+                            Text("上次检查：\(date.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Text("mac app 与 CoreS3 固件必须使用同一个 Release。应用更新不会自动烧录固件，请同步升级设备。")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Link("下载配套固件", destination: URL(string:
+                            "https://github.com/\(AppUpdateRelease.repository)/releases/tag/v\(updater.currentVersion)")!)
+                            .font(.caption)
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxWidth: 480)
+                Button("退出 CoreS3 Companion") {
+                    NSApp.terminate(nil)
+                }
+                .disabled(updater.state.isInstalling)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(40)
+        }
+    }
+}
+
+private struct AppUpdateStatusView: View {
+    @EnvironmentObject private var updater: AppUpdateService
+
+    var body: some View {
+        switch updater.state {
+        case .idle:
+            Text("尚未检查更新").foregroundStyle(.secondary)
+        case .checking:
+            HStack { ProgressView().controlSize(.small); Text("正在检查更新…") }
+        case .upToDate:
+            Text("已是最新版").foregroundStyle(.secondary)
+        case .available:
+            if let release = updater.release { Text("发现新版本 \(release.tag)") }
+        case .downloading(let progress):
+            VStack(alignment: .leading, spacing: 6) {
+                ProgressView(value: progress)
+                Text("正在下载安装包… \(Int(progress * 100))%")
+            }
+        case .preparing:
+            HStack { ProgressView().controlSize(.small); Text("正在校验并准备安装…") }
+        case .restarting:
+            Text("正在安装并重启…")
+        case .failed(let message):
+            Text(message).foregroundStyle(.red).textSelection(.enabled)
+        }
+    }
+}
+
+private struct AppUpdateView: View {
+    @EnvironmentObject private var updater: AppUpdateService
+    let release: AppUpdateRelease
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("发现新版本 \(release.tag)").font(.title2.bold())
+            Text("当前版本 \(updater.currentVersion) · 安装包 \(ByteCountFormatter.string(fromByteCount: release.downloadSize, countStyle: .file))")
                 .foregroundStyle(.secondary)
-            Button("退出 CoreS3 Companion") {
-                NSApp.terminate(nil)
+            ScrollView {
+                Text(release.notes).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(minHeight: 120, maxHeight: 220)
+            Text("请同时将 CoreS3 固件升级到 \(release.tag)。点击更新后，应用将下载、安装并自动重启；设备固件需单独烧录。")
+                .font(.callout)
+            Link("查看 Release / 下载配套固件", destination: release.pageURL)
+            AppUpdateStatusView()
+            HStack {
+                if case .downloading = updater.state {
+                    Button("取消下载") { updater.cancelDownload() }
+                } else {
+                    Button("跳过此版本") { updater.skipRelease() }.disabled(updater.state.isBusy)
+                    Button("稍后") { updater.promptRelease = nil }.disabled(updater.state.isBusy)
+                }
+                Spacer()
+                Button("下载、安装并重启") { updater.install() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(updater.state.isBusy)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
+        .padding(24)
+        .frame(width: 560)
+        .interactiveDismissDisabled(updater.state.isInstalling)
     }
 }

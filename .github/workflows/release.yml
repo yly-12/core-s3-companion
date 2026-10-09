@@ -109,6 +109,9 @@ jobs:
           -derivedDataPath "$RUNNER_TEMP/CoreS3CompanionDerivedData"
           CODE_SIGNING_ALLOWED=NO
 
+      - name: Test update installer rollback
+        run: python3 scripts/test-update-helper.py
+
       - name: Archive unsigned app
         run: |
           archive_path="$RUNNER_TEMP/CoreS3Companion.xcarchive"

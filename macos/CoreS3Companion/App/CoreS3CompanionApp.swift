@@ -5,12 +5,13 @@ import SwiftUI
 @MainActor
 final class CoreS3CompanionAppDelegate: NSObject, NSApplicationDelegate {
     let model = CompanionViewModel()
+    let updater = AppUpdateService()
 
     private var statusItem: NSStatusItem?
     private var cancellables: Set<AnyCancellable> = []
 
     private lazy var settingsWindowController: NSWindowController = {
-        let rootView = ContentView().environmentObject(model)
+        let rootView = ContentView().environmentObject(model).environmentObject(updater)
         let hostingController = NSHostingController(rootView: rootView)
         let window = NSWindow(contentViewController: hostingController)
         window.title = "CoreS3 Companion"
@@ -30,6 +31,10 @@ final class CoreS3CompanionAppDelegate: NSObject, NSApplicationDelegate {
         configureStatusItem()
         observeModel()
         model.start()
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil,
+           NSClassFromString("XCTestCase") == nil {
+            updater.start()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -63,6 +68,12 @@ final class CoreS3CompanionAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func observeModel() {
+        updater.$promptRelease
+            .compactMap { $0 }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.showSettings() }
+            .store(in: &cancellables)
+
         model.$agentSnapshot
             .receive(on: RunLoop.main)
             .sink { [weak self] snapshot in

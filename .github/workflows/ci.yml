@@ -77,3 +77,6 @@ jobs:
           -destination 'platform=macOS'
           -derivedDataPath "$RUNNER_TEMP/CoreS3CompanionDerivedData"
           CODE_SIGNING_ALLOWED=NO
+
+      - name: Test update installer rollback
+        run: python3 scripts/test-update-helper.py
