@@ -27,6 +27,8 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
     private let currentDate: () -> Date
     private var timer: Timer?
     private var codexRolloutCaches: [CodexProfile: [URL: CodexRolloutReader.CacheEntry]] = [:]
+    private var codexMetadataCaches: [CodexProfile: [URL: CodexRolloutReader.MetadataCacheEntry]] = [:]
+    private var codexSubagentSessionKeys: Set<CodexSessionKey> = []
     private var cachedCodexRollouts: [ProfiledCodexRollout] = []
     private var lastCodexScanAt = Date.distantPast
     private var claudeHookRecordCache: [URL: HookRecordCacheEntry] = [:]
@@ -126,7 +128,7 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
         )
 
         let codexHooks = loadHookRecords(for: .codex)
-        let codexRollouts = loadCodexRollouts()
+        let codexRollouts = loadCodexRollouts(hooks: codexHooks)
         let codexSnapshots = mergeCodex(
             hooks: codexHooks,
             rollouts: codexRollouts,
@@ -233,6 +235,7 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
 
         for hook in hooks {
             let key = CodexSessionKey(profile: hook.codexProfile, sessionID: hook.sessionID)
+            guard !codexSubagentSessionKeys.contains(key) else { continue }
             let rollout = rolloutByID.removeValue(forKey: key)
             let rolloutRecord = rollout?.snapshot.record
             let stateRecord = newest(hook, rolloutRecord)
@@ -241,7 +244,7 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
                 sessionID: hook.sessionID,
                 source: .codex,
                 codexProfile: hook.codexProfile,
-                state: stateRecord.state,
+                state: codexDisplayState(stateRecord, rollout: rollout?.snapshot),
                 title: nonEmpty(sessionTitles[key])
                     ?? nonEmpty(hook.title)
                     ?? nonEmpty(rolloutRecord?.title)
@@ -265,7 +268,7 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
                 sessionID: record.sessionID,
                 source: .codex,
                 codexProfile: rollout.profile,
-                state: record.state,
+                state: codexDisplayState(record, rollout: rollout.snapshot),
                 title: nonEmpty(sessionTitles[key])
                     ?? nonEmpty(record.title)
                     ?? "CODEX SESSION",
@@ -280,6 +283,18 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
             ))
         }
         return results
+    }
+
+    private func codexDisplayState(
+        _ record: StatusRecord,
+        rollout: CodexRolloutReader.Snapshot?
+    ) -> AgentRunState {
+        if record.state == .waitingAuthorization,
+           rollout?.approvalsReviewer == "auto_review",
+           rollout?.record.authorizationRequiresUser != true {
+            return .running
+        }
+        return record.state
     }
 
     private func loadClaudeSessionTitles() -> [String: String] {
@@ -598,21 +613,34 @@ final class AgentStatusMonitor: AgentStatusMonitoring {
         claudeTranscriptCache = claudeTranscriptCache.filter { retainedURLs.contains($0.key) }
     }
 
-    private func loadCodexRollouts() -> [ProfiledCodexRollout] {
+    private func loadCodexRollouts(hooks: [StatusRecord]) -> [ProfiledCodexRollout] {
         let now = currentDate()
         guard now.timeIntervalSince(lastCodexScanAt) >= 3 else {
             return cachedCodexRollouts
         }
         lastCodexScanAt = now
+        codexSubagentSessionKeys.removeAll(keepingCapacity: true)
         cachedCodexRollouts = codexProfileLocations.flatMap { location in
             var cache = codexRolloutCaches[location.profile] ?? [:]
-            let snapshots = CodexRolloutReader.loadRecent(
+            var metadataCache = codexMetadataCaches[location.profile] ?? [:]
+            // Active hooks can refer to a main session outside the recent rollout limit.
+            let activeHookIDs = Set(hooks.filter {
+                $0.codexProfile == location.profile && $0.state != .idle
+                    && now.timeIntervalSince($0.updatedAt ?? .distantPast) <= 30 * 60
+            }.map(\.sessionID))
+            let scan = CodexRolloutReader.loadRecent(
                 from: location.sessionsURL,
                 fileManager: fileManager,
-                cache: &cache
+                includedSessionIDs: activeHookIDs,
+                cache: &cache,
+                metadataCache: &metadataCache
             )
             codexRolloutCaches[location.profile] = cache
-            return snapshots.map {
+            codexMetadataCaches[location.profile] = metadataCache
+            codexSubagentSessionKeys.formUnion(scan.subagentSessionIDs.map {
+                CodexSessionKey(profile: location.profile, sessionID: $0)
+            })
+            return scan.snapshots.map {
                 ProfiledCodexRollout(profile: location.profile, snapshot: $0)
             }
         }
@@ -791,6 +819,7 @@ private struct StatusRecord {
     var effort: String? = nil
     var contextUsed: UInt8?
     var updatedAt: Date?
+    var authorizationRequiresUser: Bool = false
 }
 
 private struct CodexSessionKey: Hashable {
@@ -1025,6 +1054,23 @@ private enum CodexRolloutReader {
     struct Snapshot {
         var record: StatusRecord
         var usage: AgentUsage?
+        var approvalsReviewer: String?
+    }
+
+    struct ScanResult {
+        var snapshots: [Snapshot]
+        var subagentSessionIDs: Set<String>
+    }
+
+    struct SessionMetadata {
+        var sessionID: String?
+        var isSubagent: Bool
+    }
+
+    struct MetadataCacheEntry {
+        var modifiedAt: Date
+        var fileSize: Int
+        var metadata: SessionMetadata?
     }
 
     struct ParserState {
@@ -1032,8 +1078,9 @@ private enum CodexRolloutReader {
         var usage: AgentUsage?
         var contextWindow: Double?
         var turnCompleted: Bool
-        var pendingReplyCallIDs: Set<String>
+        var pendingUserCallIDs: Set<String>
         var trailingData: Data
+        var approvalsReviewer: String? = nil
     }
 
     struct CacheEntry {
@@ -1042,7 +1089,7 @@ private enum CodexRolloutReader {
         var state: ParserState
 
         var snapshot: Snapshot {
-            Snapshot(record: state.record, usage: state.usage)
+            Snapshot(record: state.record, usage: state.usage, approvalsReviewer: state.approvalsReviewer)
         }
     }
 
@@ -1050,14 +1097,37 @@ private enum CodexRolloutReader {
         from rootURL: URL,
         fileManager: FileManager,
         limit: Int = 12,
-        cache: inout [URL: CacheEntry]
-    ) -> [Snapshot] {
-        let candidates = Array(
-            recentRolloutURLs(from: rootURL, fileManager: fileManager).prefix(limit)
-        )
+        includedSessionIDs: Set<String>,
+        cache: inout [URL: CacheEntry],
+        metadataCache: inout [URL: MetadataCacheEntry]
+    ) -> ScanResult {
+        let allCandidates = recentRolloutURLs(from: rootURL, fileManager: fileManager)
+        let allURLs = Set(allCandidates.map(\.url))
+        metadataCache = metadataCache.filter { allURLs.contains($0.key) }
+        var subagentSessionIDs: Set<String> = []
+        var mainCount = 0
+        let candidates = allCandidates.filter { candidate in
+            let metadata: SessionMetadata?
+            if let cached = metadataCache[candidate.url], cached.metadata != nil,
+               (candidate.fileSize > cached.fileSize
+                || (candidate.fileSize == cached.fileSize && candidate.modifiedAt == cached.modifiedAt)) {
+                metadata = cached.metadata
+            } else {
+                metadata = readSessionMetadata(from: candidate.url)
+            }
+            metadataCache[candidate.url] = MetadataCacheEntry(
+                modifiedAt: candidate.modifiedAt, fileSize: candidate.fileSize, metadata: metadata
+            )
+            if metadata?.isSubagent == true {
+                if let sessionID = metadata?.sessionID { subagentSessionIDs.insert(sessionID) }
+                return false
+            }
+            mainCount += 1
+            return mainCount <= limit || metadata?.sessionID.map(includedSessionIDs.contains) == true
+        }
         let retainedURLs = Set(candidates.map(\.url))
         cache = cache.filter { retainedURLs.contains($0.key) }
-        return candidates.compactMap { candidate in
+        let snapshots = candidates.compactMap { candidate -> Snapshot? in
             if let cached = cache[candidate.url],
                cached.modifiedAt == candidate.modifiedAt,
                cached.fileSize == candidate.fileSize {
@@ -1087,6 +1157,33 @@ private enum CodexRolloutReader {
             cache[candidate.url] = entry
             return entry.snapshot
         }
+        return ScanResult(snapshots: snapshots, subagentSessionIDs: subagentSessionIDs)
+    }
+
+    private static func readSessionMetadata(from fileURL: URL) -> SessionMetadata? {
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return nil }
+        defer { try? handle.close() }
+        // Only read the header, not the full transcripts of historical sessions.
+        var header = Data()
+        do {
+            while let chunk = try handle.read(upToCount: 4_096), !chunk.isEmpty {
+                if let newline = chunk.firstIndex(of: 0x0A) {
+                    header.append(chunk[..<newline])
+                    break
+                }
+                header.append(chunk)
+            }
+        } catch {
+            return nil
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: header) as? [String: Any],
+              object["type"] as? String == "session_meta",
+              let payload = object["payload"] as? [String: Any] else { return nil }
+        let source = payload["source"] as? [String: Any]
+        return SessionMetadata(
+            sessionID: string(payload["id"]) ?? string(payload["session_id"]),
+            isSubagent: source?["subagent"] != nil
+        )
     }
 
     private static func load(
@@ -1112,7 +1209,7 @@ private enum CodexRolloutReader {
             usage: nil,
             contextWindow: nil,
             turnCompleted: false,
-            pendingReplyCallIDs: [],
+            pendingUserCallIDs: [],
             trailingData: Data()
         )
         process(data, state: &state)
@@ -1171,6 +1268,8 @@ private enum CodexRolloutReader {
         }
 
         if outerType == "turn_context" {
+            state.approvalsReviewer = string(payload["approvals_reviewer"])
+                ?? string((payload["thread_settings"] as? [String: Any])?["approvals_reviewer"])
             state.record.modelName = string(payload["model"])
                 ?? string((payload["thread_settings"] as? [String: Any])?["model"])
                 ?? state.record.modelName
@@ -1182,6 +1281,11 @@ private enum CodexRolloutReader {
 
         if outerType == "event_msg", let type = payload["type"] as? String {
             switch type {
+            case "thread_settings_applied":
+                if let settings = payload["thread_settings"] as? [String: Any],
+                   let reviewer = string(settings["approvals_reviewer"]) {
+                    state.approvalsReviewer = reviewer
+                }
             case "user_message", "task_started":
                 state.record.state = .running
                 state.turnCompleted = false
@@ -1191,8 +1295,13 @@ private enum CodexRolloutReader {
             case "request_user_input", "elicitation_request":
                 state.record.state = .waitingReply
                 state.turnCompleted = false
-            case "exec_approval_request", "apply_patch_approval_request", "request_permissions":
+            case "exec_approval_request", "apply_patch_approval_request":
                 state.record.state = .waitingAuthorization
+                state.record.authorizationRequiresUser = false
+                state.turnCompleted = false
+            case "request_permissions":
+                state.record.state = .waitingAuthorization
+                state.record.authorizationRequiresUser = true
                 state.turnCompleted = false
             case "agent_reasoning", "exec_command_begin", "patch_apply_begin", "mcp_tool_call_begin",
                  "web_search_begin", "image_generation_begin", "plan_update":
@@ -1211,24 +1320,30 @@ private enum CodexRolloutReader {
         }
 
         if outerType == "response_item",
-           payload["type"] as? String == "function_call",
-           payload["name"] as? String == "request_user_input" {
-            state.record.state = .waitingReply
-            state.turnCompleted = false
-            if let callID = string(payload["call_id"]) {
-                state.pendingReplyCallIDs.insert(callID)
+           payload["type"] as? String == "function_call" {
+            let name = payload["name"] as? String
+            if name == "request_user_input" || name == "request_permissions" {
+                state.record.state = name == "request_permissions" ? .waitingAuthorization : .waitingReply
+                state.record.authorizationRequiresUser = name == "request_permissions"
+                state.turnCompleted = false
+                if let callID = string(payload["call_id"]) {
+                    state.pendingUserCallIDs.insert(callID)
+                }
             }
         }
 
         if outerType == "response_item",
            payload["type"] as? String == "function_call_output",
            let callID = string(payload["call_id"]),
-           state.pendingReplyCallIDs.remove(callID) != nil {
+           state.pendingUserCallIDs.remove(callID) != nil {
             state.record.state = .running
             state.turnCompleted = false
         }
 
         if let timestamp { state.record.updatedAt = timestamp }
+        if state.record.state != .waitingAuthorization {
+            state.record.authorizationRequiresUser = false
+        }
         return true
     }
 

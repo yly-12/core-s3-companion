@@ -117,6 +117,9 @@ pio test -e native
   `sessions/**/rollout-*.jsonl` 被动读取。额度窗口按实际
   `window_minutes` 分类；账号没有 5H 窗口时不显示该项。Codex 的 CTX 按最新一次
   token usage 除以该会话的模型 context window 计算，不使用跨请求累计 token。
+  根据 rollout 的 `session_meta.source.subagent` 排除子 agent（包括自动审批的 guardian），
+  子 agent 的完成事件不会参与会话轮播。`Approve for me` / `auto_review` 的自动审批期间
+  保持 `RUNNING`；人工审批或审批模式未知时保留 `AUTH`，明确的用户权限请求仍显示 `AUTH`。
 
 Claude 会话标题优先使用用户明确命名的 session；未明确命名时读取 transcript 中最新的
 `ai-title` 模型摘要，并忽略 `nameSource=derived` 的内部代号。Codex 读取

@@ -479,13 +479,17 @@ struct AgentStatusMonitorTests {
         ]
         var locations: [CodexProfileLocation] = []
         for (profile, title, usedPercent) in specifications {
+            let sessionID = profile == .personal ? "personal-session" : "shared-session-id"
             let home = root.appendingPathComponent(profile.hookValue, isDirectory: true)
             let sessions = home.appendingPathComponent("sessions/2026/09/30", isDirectory: true)
             try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
             let lines = [
                 try rolloutRecord(outerType: "session_meta", payload: [
-                    "id": "shared-session-id",
+                    "id": sessionID,
                     "cwd": "/tmp/\(profile.hookValue)",
+                ]),
+                try rolloutRecord(outerType: "turn_context", payload: [
+                    "approvals_reviewer": profile == .personal ? "auto_review" : "user",
                 ]),
                 try rolloutLine(type: "task_started", payload: [:]),
                 try rolloutLine(type: "token_count", payload: [
@@ -507,7 +511,7 @@ struct AgentStatusMonitorTests {
                 encoding: .utf8
             )
             try rolloutRecord(outerType: nil, payload: [
-                "id": "shared-session-id",
+                "id": sessionID,
                 "thread_name": title,
             ]).write(
                 to: home.appendingPathComponent("session_index.jsonl"),
@@ -515,7 +519,26 @@ struct AgentStatusMonitorTests {
                 encoding: .utf8
             )
             locations.append(CodexProfileLocation(profile: profile, homeURL: home))
+            try jsonData([
+                "sessionID": sessionID, "codexProfile": profile.hookValue,
+                "state": "waiting_authorization", "updatedAt": Date().timeIntervalSince1970,
+            ]).write(to: states.appendingPathComponent("codex-\(profile.hookValue)-session-\(sessionID).json"))
         }
+
+        // The same ID can name a subagent in Personal and a main thread in Work.
+        try [
+            rolloutRecord(outerType: "session_meta", payload: [
+                "id": "shared-session-id", "source": ["subagent": ["other": "guardian"]],
+            ]),
+            rolloutLine(type: "task_complete", payload: [:]),
+        ].joined(separator: "\n").write(
+            to: root.appendingPathComponent("personal/sessions/rollout-guardian.jsonl"),
+            atomically: true, encoding: .utf8
+        )
+        try jsonData([
+            "sessionID": "shared-session-id", "codexProfile": "personal",
+            "state": "completed", "updatedAt": Date().timeIntervalSince1970,
+        ]).write(to: states.appendingPathComponent("codex-personal-session-shared-session-id.json"))
 
         let monitor = AgentStatusMonitor(
             stateDirectoryURL: states,
@@ -535,8 +558,234 @@ struct AgentStatusMonitorTests {
         #expect(snapshots.count == 2)
         #expect(byProfile[.personal]?.title == "Personal task")
         #expect(byProfile[.personal]?.weeklyRemaining == 68)
+        #expect(byProfile[.personal]?.state == .running)
         #expect(byProfile[.work]?.title == "Work task")
         #expect(byProfile[.work]?.weeklyRemaining == 28)
+        #expect(byProfile[.work]?.state == .waitingAuthorization)
+    }
+
+    @Test("Active main hooks retain approval metadata outside the recent rollout limit")
+    func readsOlderActiveCodexMain() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("core-s3-codex-older-main-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessions = root.appendingPathComponent("sessions", isDirectory: true)
+        let states = root.appendingPathComponent("state", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: states, withIntermediateDirectories: true)
+        let url = sessions.appendingPathComponent("rollout-old-main.jsonl")
+        try [
+            rolloutRecord(outerType: "session_meta", payload: ["id": "old-main"]),
+            rolloutRecord(outerType: "turn_context", payload: ["approvals_reviewer": "auto_review"]),
+            rolloutLine(type: "task_started", payload: [:]),
+        ].joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-100)], ofItemAtPath: url.path
+        )
+        for index in 0..<12 {
+            try rolloutRecord(outerType: "session_meta", payload: ["id": "idle-\(index)"]).write(
+                to: sessions.appendingPathComponent("rollout-idle-\(index).jsonl"),
+                atomically: true, encoding: .utf8
+            )
+        }
+        try jsonData([
+            "sessionID": "old-main", "state": "waiting_authorization",
+            "updatedAt": Date().timeIntervalSince1970,
+        ]).write(to: states.appendingPathComponent("codex-session-old-main.json"))
+        let monitor = codexTestMonitor(root: root)
+        var snapshots: [AgentSnapshot] = []
+        monitor.onSnapshots = { snapshots = $0 }
+        monitor.refresh()
+        #expect(snapshots.count == 1)
+        #expect(snapshots.first?.sessionID == "old-main")
+        #expect(snapshots.first?.state == .running)
+    }
+
+    @Test("Subagents and their hooks never enter the main-session rotation")
+    func filtersCodexSubagentsAcrossLifecycle() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("core-s3-codex-subagents-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let states = root.appendingPathComponent("state", isDirectory: true)
+        let sessions = root.appendingPathComponent("sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: states, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        let mainURL = sessions.appendingPathComponent("rollout-main.jsonl")
+        let mainLines = [
+            try rolloutRecord(outerType: "session_meta", payload: [
+                "id": "main", "source": "vscode", "cwd": "/tmp/project",
+            ]),
+            try rolloutRecord(outerType: "turn_context", payload: ["approvals_reviewer": "auto_review"]),
+            try rolloutLine(type: "task_started", payload: [:]),
+            try rolloutLine(type: "token_count", payload: [
+                "rate_limits": ["primary": ["used_percent": 32, "window_minutes": 10_080]],
+                "info": ["last_token_usage": ["total_tokens": 20_000], "model_context_window": 100_000],
+            ]),
+        ]
+        try mainLines.joined(separator: "\n").write(to: mainURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-100)], ofItemAtPath: mainURL.path
+        )
+
+        // More than the old 12-file limit; include a large UTF-8 header and a spawned worker.
+        for index in 0..<14 {
+            let source: [String: Any] = index == 13
+                ? ["subagent": ["spawn": ["parent_thread_id": "main", "depth": 1]]]
+                : ["subagent": ["other": "guardian"]]
+            let lines = [
+                try rolloutRecord(outerType: "session_meta", payload: [
+                    "id": "child-\(index)", "source": source,
+                    "base_instructions": String(repeating: "审批", count: 3_000),
+                ]),
+                try rolloutLine(type: "task_started", payload: [:]),
+                try rolloutLine(type: "token_count", payload: [
+                    "rate_limits": ["primary": ["used_percent": 99, "window_minutes": 10_080]],
+                ]),
+            ]
+            let url = sessions.appendingPathComponent("rollout-child-\(index).jsonl")
+            try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+            if index == 0 {
+                // Its active hook must be excluded even when this transcript is very old.
+                try FileManager.default.setAttributes(
+                    [.modificationDate: Date().addingTimeInterval(-500)], ofItemAtPath: url.path
+                )
+            }
+            try jsonData([
+                "sessionID": "child-\(index)", "state": "waiting_authorization",
+                "updatedAt": Date().timeIntervalSince1970,
+            ]).write(to: states.appendingPathComponent("codex-session-child-\(index).json"))
+        }
+        try jsonData([
+            "sessionID": "main", "state": "waiting_authorization",
+            "updatedAt": Date().timeIntervalSince1970,
+        ]).write(to: states.appendingPathComponent("codex-session-main.json"))
+
+        var now = Date()
+        let monitor = codexTestMonitor(root: root, currentDate: { now })
+        var snapshots: [AgentSnapshot] = []
+        monitor.onSnapshots = { snapshots = $0 }
+        monitor.refresh()
+        #expect(snapshots.count == 1)
+        #expect(snapshots.first?.sessionID == "main")
+        #expect(snapshots.first?.state == .running)
+        #expect(snapshots.first?.weeklyRemaining == 68)
+        #expect(snapshots.first?.contextUsed == 20)
+
+        try appendRolloutLines([
+            try rolloutLine(type: "task_complete", payload: [:]),
+        ], to: sessions.appendingPathComponent("rollout-child-13.jsonl"))
+        now.addTimeInterval(4)
+        monitor.refresh()
+        #expect(snapshots.count == 1)
+        #expect(snapshots.first?.state == .running)
+
+        try appendRolloutLines([try rolloutLine(type: "task_complete", payload: [:])], to: mainURL)
+        now.addTimeInterval(4)
+        monitor.refresh()
+        #expect(snapshots.count == 1)
+        #expect(snapshots.first?.sessionID == "main")
+        #expect(snapshots.first?.state == .completed)
+    }
+
+    @Test("Only known automatic approval hides AUTH", arguments:
+        ["auto_review", "user", "missing"],
+        ["hook", "exec_approval_request", "apply_patch_approval_request", "request_permissions"]
+    )
+    func codexApprovalDisplay(reviewer: String, event: String) throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("core-s3-codex-approval-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessions = root.appendingPathComponent("sessions", isDirectory: true)
+        let states = root.appendingPathComponent("state", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: states, withIntermediateDirectories: true)
+        var context: [String: Any] = ["model": "gpt-5"]
+        if reviewer != "missing" { context["approvals_reviewer"] = reviewer }
+        var lines = [
+            try rolloutRecord(outerType: "session_meta", payload: ["id": "main", "source": "vscode"]),
+            try rolloutRecord(outerType: "turn_context", payload: context),
+            try rolloutLine(type: "task_started", payload: [:]),
+        ]
+        if event != "hook" { lines.append(try rolloutLine(type: event, payload: [:])) }
+        try lines.joined(separator: "\n").write(
+            to: sessions.appendingPathComponent("rollout-main.jsonl"), atomically: true, encoding: .utf8
+        )
+        if event == "hook" {
+            try jsonData([
+                "sessionID": "main", "state": "waiting_authorization",
+                "updatedAt": Date().timeIntervalSince1970,
+            ]).write(to: states.appendingPathComponent("codex-session-main.json"))
+        }
+        let monitor = codexTestMonitor(root: root)
+        var snapshots: [AgentSnapshot] = []
+        monitor.onSnapshots = { snapshots = $0 }
+        monitor.refresh()
+        #expect(snapshots.count == 1)
+        let expected: AgentRunState = reviewer == "auto_review" && event != "request_permissions"
+            ? .running : .waitingAuthorization
+        #expect(snapshots.first?.state == expected)
+    }
+
+    @Test("Approval mode changes and explicit user requests survive incremental parsing")
+    func codexApprovalModeChanges() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("core-s3-codex-approval-mode-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessions = root.appendingPathComponent("sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+        let url = sessions.appendingPathComponent("rollout-main.jsonl")
+        try [
+            rolloutRecord(outerType: "session_meta", payload: ["id": "main"]),
+            rolloutRecord(outerType: "turn_context", payload: ["approvals_reviewer": "auto_review"]),
+            rolloutLine(type: "exec_approval_request", payload: [:]),
+        ].joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        var now = Date()
+        let monitor = codexTestMonitor(root: root, currentDate: { now })
+        var snapshot: AgentSnapshot?
+        monitor.onSnapshots = { snapshot = $0.first }
+        monitor.refresh()
+        #expect(snapshot?.state == .running)
+
+        try appendRolloutLines([try rolloutLine(type: "thread_settings_applied", payload: [
+            "thread_settings": ["approvals_reviewer": "user"],
+        ])], to: url)
+        now.addTimeInterval(4)
+        monitor.refresh()
+        #expect(snapshot?.state == .waitingAuthorization)
+
+        try appendRolloutLines([try rolloutLine(type: "thread_settings_applied", payload: [
+            "thread_settings": ["approvals_reviewer": "auto_review"],
+        ])], to: url)
+        now.addTimeInterval(4)
+        monitor.refresh()
+        #expect(snapshot?.state == .running)
+
+        try appendRolloutLines([try rolloutRecord(outerType: "response_item", payload: [
+            "type": "function_call", "name": "request_permissions", "call_id": "permissions-call",
+        ])], to: url)
+        now.addTimeInterval(4)
+        monitor.refresh()
+        #expect(snapshot?.state == .waitingAuthorization)
+
+        try appendRolloutLines([try rolloutRecord(outerType: "response_item", payload: [
+            "type": "function_call_output", "call_id": "permissions-call", "output": "{}",
+        ])], to: url)
+        now.addTimeInterval(4)
+        monitor.refresh()
+        #expect(snapshot?.state == .running)
+
+        try appendRolloutLines([try rolloutLine(type: "request_user_input", payload: [:])], to: url)
+        now.addTimeInterval(4)
+        monitor.refresh()
+        #expect(snapshot?.state == .waitingReply)
+
+        try appendRolloutLines([
+            try rolloutRecord(outerType: "turn_context", payload: ["model": "gpt-5"]),
+            try rolloutLine(type: "exec_approval_request", payload: [:]),
+        ], to: url)
+        now.addTimeInterval(4)
+        monitor.refresh()
+        #expect(snapshot?.state == .waitingAuthorization)
     }
 
     @Test("Incrementally parses lines appended to a Codex rollout")
@@ -1325,6 +1574,30 @@ private func rolloutLine(type: String, payload: [String: Any]) throws -> String 
     var eventPayload = payload
     eventPayload["type"] = type
     return try rolloutRecord(outerType: "event_msg", payload: eventPayload)
+}
+
+private func codexTestMonitor(
+    root: URL,
+    currentDate: @escaping () -> Date = Date.init
+) -> AgentStatusMonitor {
+    let monitor = AgentStatusMonitor(
+        stateDirectoryURL: root.appendingPathComponent("state"),
+        codexSessionsURL: root.appendingPathComponent("sessions"),
+        claudeSessionsURL: root.appendingPathComponent("no-claude-sessions"),
+        claudeProjectsURL: root.appendingPathComponent("no-claude-projects"),
+        claudeConfigurationURL: root.appendingPathComponent("no-claude-configuration"),
+        codexSessionIndexURL: root.appendingPathComponent("no-codex-index"),
+        currentDate: currentDate
+    )
+    monitor.selectedSource = .codex
+    return monitor
+}
+
+private func appendRolloutLines(_ lines: [String], to url: URL) throws {
+    let handle = try FileHandle(forWritingTo: url)
+    defer { try? handle.close() }
+    try handle.seekToEnd()
+    try handle.write(contentsOf: Data(("\n" + lines.joined(separator: "\n")).utf8))
 }
 
 private func rolloutRecord(outerType: String?, payload: [String: Any]) throws -> String {
