@@ -75,6 +75,9 @@ final class CoreS3CompanionAppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
 
         model.$agentSnapshot
+            .removeDuplicates { previous, current in
+                previous.source == current.source && previous.state == current.state
+            }
             .receive(on: RunLoop.main)
             .sink { [weak self] snapshot in
                 guard let button = self?.statusItem?.button else { return }

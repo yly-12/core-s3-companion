@@ -2,9 +2,19 @@ import AppKit
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject private var model: CompanionViewModel
     @EnvironmentObject private var updater: AppUpdateService
 
+    var body: some View {
+        SettingsTabsView()
+            .sheet(item: $updater.promptRelease) { release in
+                AppUpdateView(release: release).environmentObject(updater)
+            }
+    }
+}
+
+// Keep the tab container independent of observable models. Rebuilding tab items
+// on every status poll retains SwiftUI tab metadata on macOS, even when hidden.
+private struct SettingsTabsView: View {
     var body: some View {
         TabView {
             DeviceSettingsView()
@@ -17,9 +27,6 @@ struct ContentView: View {
                 .tabItem { Label("关于", systemImage: "info.circle") }
         }
         .frame(minWidth: 680, minHeight: 520)
-        .sheet(item: $updater.promptRelease) { release in
-            AppUpdateView(release: release).environmentObject(updater)
-        }
     }
 }
 

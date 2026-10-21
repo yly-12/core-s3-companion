@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import Testing
 
@@ -1388,6 +1389,89 @@ struct CompanionViewModelTests {
         monitor.onSnapshots?([snapshot])
         #expect(transport.sentPackets.count == 2)
         _ = model
+    }
+
+    @Test("Repeated polls do not publish UI changes but still send BLE heartbeats")
+    func repeatedPollsDoNotPublishUIChanges() {
+        let transport = MockBLETransport()
+        let monitor = MockAgentStatusMonitor()
+        var now = Date(timeIntervalSince1970: 1_000)
+        let model = makeModel(transport: transport, monitor: monitor, currentDate: { now })
+        var snapshot = AgentSnapshot.idle
+        snapshot.state = .running
+        snapshot.title = "Stable session"
+        snapshot.updatedAt = now
+
+        var snapshotChanges = 0
+        var listChanges = 0
+        let snapshotSubscription = model.$agentSnapshot.dropFirst().sink { _ in snapshotChanges += 1 }
+        let listSubscription = model.$agentSnapshots.dropFirst().sink { _ in listChanges += 1 }
+        defer {
+            snapshotSubscription.cancel()
+            listSubscription.cancel()
+        }
+        transport.onStateChange?(.connected(UUID()))
+        monitor.onSnapshots?([snapshot])
+        for _ in 0..<1_000 { monitor.onSnapshots?([snapshot]) }
+
+        #expect(snapshotChanges == 1)
+        #expect(listChanges == 1)
+        #expect(transport.sentPackets.count == 1)
+
+        now.addTimeInterval(15)
+        monitor.onSnapshots?([snapshot])
+        #expect(transport.sentPackets.count == 2)
+        #expect(snapshotChanges == 1)
+        #expect(listChanges == 1)
+
+        snapshot.title = "Updated session"
+        snapshot.updatedAt = now
+        monitor.onSnapshots?([snapshot])
+        #expect(model.agentSnapshot == snapshot)
+        #expect(snapshotChanges == 2)
+        #expect(listChanges == 2)
+        #expect(transport.sentPackets.count == 3)
+    }
+
+    @Test("Other session updates do not republish the selected snapshot or reset rotation")
+    func otherSessionUpdatesDoNotRepublishSelectedSnapshot() {
+        let monitor = MockAgentStatusMonitor()
+        let model = makeModel(monitor: monitor)
+        var first = AgentSnapshot.idle
+        first.sessionID = "first"
+        first.state = .running
+        first.updatedAt = Date(timeIntervalSince1970: 1_000)
+        var second = first
+        second.sessionID = "second"
+        monitor.onSnapshots?([first, second])
+
+        var snapshotChanges = 0
+        var listChanges = 0
+        let snapshotSubscription = model.$agentSnapshot.dropFirst().sink { _ in snapshotChanges += 1 }
+        let listSubscription = model.$agentSnapshots.dropFirst().sink { _ in listChanges += 1 }
+        defer {
+            snapshotSubscription.cancel()
+            listSubscription.cancel()
+        }
+
+        second.contextUsed = 42
+        monitor.onSnapshots?([first, second])
+        #expect(snapshotChanges == 0)
+        #expect(listChanges == 1)
+
+        first.updatedAt = first.updatedAt?.addingTimeInterval(1)
+        monitor.onSnapshots?([first, second])
+        #expect(model.agentSnapshot == first)
+        #expect(snapshotChanges == 1)
+        #expect(listChanges == 2)
+
+        model.rotateSession()
+        #expect(model.agentSnapshot == second)
+        #expect(snapshotChanges == 2)
+        monitor.onSnapshots?([first, second])
+        #expect(model.agentSnapshot == second)
+        #expect(snapshotChanges == 2)
+        #expect(listChanges == 2)
     }
 
     @Test("Rotates active sessions before sending")

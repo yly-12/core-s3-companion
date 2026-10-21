@@ -215,7 +215,9 @@ final class CompanionViewModel: ObservableObject {
         let snapshots = snapshots.isEmpty ? [.idle] : snapshots
         let currentID = agentSnapshot.sessionID
         let currentProfile = agentSnapshot.codexProfile
-        agentSnapshots = snapshots
+        if agentSnapshots != snapshots {
+            agentSnapshots = snapshots
+        }
         let attentionIndexes = snapshots.indices.filter {
             snapshots[$0].state.requiresUserAttention
         }
@@ -234,7 +236,11 @@ final class CompanionViewModel: ObservableObject {
         } else {
             rotationIndex = 0
         }
-        agentSnapshot = snapshots[rotationIndex]
+        let snapshot = snapshots[rotationIndex]
+        if agentSnapshot != snapshot {
+            agentSnapshot = snapshot
+        }
+        // Unchanged UI state must still reach the BLE heartbeat check.
         sendCurrentSnapshot()
     }
 
